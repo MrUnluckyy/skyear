@@ -1,5 +1,11 @@
 # SkyEar web
 
+Deployed at [skyear.vercel.app](https://skyear.vercel.app) (Vercel project `skyear`, region `fra1`).
+
+Auth redirect URLs must list every origin the app is served from - the
+production domain and `http://localhost:3001/**` for development. A magic
+link to an origin missing from that allowlist silently bounces.
+
 Next.js 16 (App Router) + TypeScript + Tailwind, MapLibre GL with OpenStreetMap
 raster tiles. Deploys to Vercel.
 

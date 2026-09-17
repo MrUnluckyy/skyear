@@ -1,5 +1,7 @@
 # SkyEar
 
+**Live: [skyear.vercel.app](https://skyear.vercel.app)**
+
 Security cameras already have microphones. SkyEar listens to them, and matches
 what it hears against live aircraft positions — so every detection checks
 itself. The first use case is aircraft around Vilnius airport, because ADS-B
