@@ -138,3 +138,47 @@ def test_probe_translates_an_auth_failure(monkeypatch):
     r = probe_camera(CAMERA, "secret")
     assert "username or password" in r["error"]
     assert "secret" not in r["error"], "the credential must not survive into the message"
+
+
+def test_saving_returns_a_cookie_that_keeps_the_browser_authorised():
+    """Pressing Save used to lock the person who just configured the agent out
+    of their own setup page, with the recovery buried inside the container."""
+    import urllib.request
+    import tempfile
+    from pathlib import Path
+    from skyear.setup_server import serve
+
+    data = Path(tempfile.mkdtemp())
+    httpd = serve(data, {}, port=0, host="127.0.0.1")
+    base = f"http://127.0.0.1:{httpd.server_address[1]}"
+    try:
+        req = urllib.request.Request(
+            base + "/api/save", method="POST",
+            data=json.dumps({"camera": CAMERA, "secret": "hunter2"}).encode(),
+            headers={"content-type": "application/json"})
+        with urllib.request.urlopen(req, timeout=20) as r:
+            cookie = r.headers.get("set-cookie")
+        assert cookie and "skyear_setup=" in cookie
+        assert "HttpOnly" in cookie and "SameSite=Strict" in cookie
+
+        # that cookie alone gets back in, with no token in the URL
+        token = cookie.split("skyear_setup=")[1].split(";")[0]
+        req = urllib.request.Request(base + "/api/state",
+                                     headers={"cookie": f"skyear_setup={token}"})
+        with urllib.request.urlopen(req, timeout=10) as r:
+            assert r.status == 200
+    finally:
+        httpd.shutdown()
+
+
+def test_the_lock_message_says_how_to_get_back_in(agent):
+    import urllib.error, urllib.request
+    _, _, base = agent
+    post(base, "/api/save", {"camera": CAMERA, "secret": "hunter2"})
+    try:
+        urllib.request.urlopen(base + "/api/state", timeout=10)
+        raise AssertionError("should be locked")
+    except urllib.error.HTTPError as e:
+        body = json.loads(e.read())
+        assert "setup_token" in body["error"]
+        assert "docker exec" in body["error"]

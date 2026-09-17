@@ -96,9 +96,14 @@ class SetupHandler(BaseHTTPRequestHandler):
         log.debug(fmt, *args)
 
     # --- helpers ---------------------------------------------------------
-    def _send(self, body: bytes, ctype: str, status: int = 200):
+    def _send(self, body: bytes, ctype: str, status: int = 200, cookie: str | None = None):
         self.send_response(status)
         self.send_header("content-type", ctype)
+        if cookie:
+            # Host-only, not readable by script, and not sent cross-site. It is
+            # a LAN setup page, so Secure would break it over plain http.
+            self.send_header("set-cookie",
+                             f"skyear_setup={cookie}; Path=/; HttpOnly; SameSite=Strict; Max-Age=31536000")
         self.send_header("content-length", str(len(body)))
         self.send_header("cache-control", "no-store")
         # No external resources, no framing, no referrer leakage.
@@ -110,8 +115,8 @@ class SetupHandler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
-    def _json(self, obj, status=200):
-        self._send(json.dumps(obj).encode(), "application/json", status)
+    def _json(self, obj, status=200, cookie=None):
+        self._send(json.dumps(obj).encode(), "application/json", status, cookie=cookie)
 
     def _body(self) -> dict:
         try:
@@ -120,18 +125,31 @@ class SetupHandler(BaseHTTPRequestHandler):
         except (ValueError, json.JSONDecodeError):
             return {}
 
+    def _cookie_token(self) -> str:
+        raw = self.headers.get("cookie") or ""
+        for part in raw.split(";"):
+            name, _, value = part.strip().partition("=")
+            if name == "skyear_setup":
+                return value
+        return ""
+
     def _authorised(self) -> bool:
         """Open until a camera is saved, then a token is required.
 
-        A brand-new agent has nothing worth protecting and demanding a token
+        A brand-new agent has nothing worth protecting, and demanding a token
         from a log file would defeat the purpose of a setup page. Once a camera
         password is stored, that stops being true.
+
+        The token is accepted from a cookie as well as the query string, and
+        saving sets that cookie. Without it, pressing Save locked the person
+        who just configured the agent out of their own setup page, with the
+        recovery buried in a file inside the container.
         """
         if not config_store.is_configured(self.data_dir):
             return True
         want = config_store.setup_token(self.data_dir)
-        got = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query).get("t", [""])[0]
-        return got == want
+        query = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query).get("t", [""])[0]
+        return want in (query, self._cookie_token())
 
     # --- routes ----------------------------------------------------------
     def do_GET(self):
@@ -139,7 +157,12 @@ class SetupHandler(BaseHTTPRequestHandler):
         if route in ("/", "/index.html"):
             return self._send(self.page.encode(), "text/html; charset=utf-8")
         if not self._authorised():
-            return self._json({"error": "setup is locked on this agent"}, 403)
+            return self._json({
+                "error": "This agent is already configured, so setup is locked to the "
+                         "browser that set it up. To unlock another browser, open this page "
+                         "with ?t= followed by the token in data/setup_token "
+                         "(in Docker: docker exec skyear cat /data/setup_token).",
+            }, 403)
         if route == "/api/state":
             stored = config_store.load(self.data_dir)
             cams = stored.get("cameras", [])
@@ -165,7 +188,12 @@ class SetupHandler(BaseHTTPRequestHandler):
     def do_POST(self):
         route = urllib.parse.urlparse(self.path).path
         if not self._authorised():
-            return self._json({"error": "setup is locked on this agent"}, 403)
+            return self._json({
+                "error": "This agent is already configured, so setup is locked to the "
+                         "browser that set it up. To unlock another browser, open this page "
+                         "with ?t= followed by the token in data/setup_token "
+                         "(in Docker: docker exec skyear cat /data/setup_token).",
+            }, 403)
         body = self._body()
 
         if route == "/api/test":
@@ -189,8 +217,9 @@ class SetupHandler(BaseHTTPRequestHandler):
             if body.get("cloud_url"):
                 stored.setdefault("cloud", {})["url"] = body["cloud_url"]
             config_store.save(self.data_dir, stored)
-            return self._json({"ok": True, "restart_required": True,
-                               "setup_token": config_store.setup_token(self.data_dir)})
+            token = config_store.setup_token(self.data_dir)
+            return self._json({"ok": True, "restart_required": True, "setup_token": token},
+                              cookie=token)
 
         if route == "/api/pair":
             stored = config_store.load(self.data_dir)

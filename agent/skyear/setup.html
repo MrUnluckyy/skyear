@@ -140,7 +140,8 @@ const q = new URLSearchParams(location.search);
 const api = (p, opts) => {
   const url = new URL(p, location.origin);
   if (q.get("t")) url.searchParams.set("t", q.get("t"));
-  return fetch(url, opts).then(r => r.json());
+  // same-origin credentials so the setup cookie comes back with every call
+  return fetch(url, { credentials: "same-origin", ...(opts || {}) }).then(r => r.json());
 };
 
 function msg(el, text, ok) {
@@ -231,6 +232,14 @@ $("save").onclick = async () => {
       body: JSON.stringify({ camera: cam, secret: secretFromForm() }),
     });
     if (s.error) throw new Error(s.error);
+
+    // Saving locks the agent to whoever set it up. The cookie handles this
+    // browser; putting the token in the URL keeps a reload or a bookmark
+    // working, and gives a way in from another device.
+    if (s.setup_token && !q.get("t")) {
+      q.set("t", s.setup_token);
+      history.replaceState(null, "", `${location.pathname}?${q}`);
+    }
 
     const code = $("code").value.trim().toUpperCase();
     if (code) {
