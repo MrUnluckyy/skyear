@@ -69,6 +69,19 @@ export default function SkyMap() {
       attributionControl: { compact: true },
     });
     m.addControl(new NavigationControl({ showCompass: false }), "top-right");
+    // MapLibre swallows style and tile failures unless you listen for them.
+    m.on("error", (e) => {
+      const msg = (e as unknown as { error?: { message?: string } }).error?.message ?? String(e);
+      console.error("[skyear] map error:", msg);
+      setError(msg);
+    });
+    // The map is constructed while the dynamic-import placeholder is still
+    // swapping out, so the container can be zero-height for a frame. MapLibre
+    // does not re-check on its own: without this the style loads, the layers
+    // attach, and not one tile is ever requested - silently.
+    const ro = new ResizeObserver(() => m.resize());
+    ro.observe(container.current);
+
     m.on("load", () => {
       m.addSource("aircraft", { type: "geojson", data: aircraftFeatures([]) });
       m.addSource("sensors", { type: "geojson", data: sensorFeatures([]) });
@@ -122,6 +135,7 @@ export default function SkyMap() {
       map.current = m;
     });
     return () => {
+      ro.disconnect();
       m.remove();
       map.current = null;
     };
