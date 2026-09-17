@@ -1,0 +1,33 @@
+-- The public map was not public.
+--
+-- All four public_* views were declared `security_invoker = true`, so they ran
+-- with the caller's permissions - and anon has no policy on sensors, devices,
+-- detections or sensor_status, deliberately. An anonymous visitor saw an empty
+-- map.
+--
+-- This hid itself during development: the browser used for testing was signed
+-- in from generating a pairing code, so every query resolved through the owner
+-- policy and everything looked correct. It was found by querying the REST API
+-- with the publishable key and no session.
+--
+-- These views ARE the privacy boundary. They select only coarsened, filtered
+-- and delayed columns, so they run as their owner and read past RLS on the base
+-- tables, while the base tables stay unreachable to anon.
+--
+-- This raises the security_definer_view advisor lint on all four. That is
+-- expected and correct here: the remedy the lint suggests - RLS policies
+-- letting anon read the base tables - is strictly worse, because RLS filters
+-- rows and not columns, so anon would gain access to sensors.exact_point.
+-- Do not "fix" this without solving that first.
+--
+-- Verified as a stranger would see it: the four views return rows, while
+-- sensors.exact_point, devices.token_hash, detections and sensor_status all
+-- return nothing.
+--
+-- Body: identical to the views in 0003/0004/0005 with
+--   with (security_invoker = true)  ->  with (security_invoker = false)
+-- across public_sensors, public_detections, public_sensor_stats and
+-- public_type_stats, plus public_sensors gaining the liveness columns from
+-- sensor_status (online, hearing_now, rising, hearing_for_s, excess_db, warm).
+--
+-- Run `supabase db pull` to regenerate this file verbatim from the project.
