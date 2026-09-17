@@ -1,0 +1,169 @@
+/**
+ * Accept detections and passes from a paired agent.
+ *
+ * Auth is a device token, never a user session: the agent has no account and
+ * cannot read anything back. Writes land on the service role, so no client
+ * insert policy exists on these tables at all.
+ *
+ * Ingest is idempotent by database constraint - unique (device_id, event_id)
+ * and (device_id, hex, closest_at) - so a retried upload after a dropped
+ * connection cannot duplicate rows. The agent is free to re-send.
+ */
+import { createClient } from "jsr:@supabase/supabase-js@2";
+
+const CORS = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Headers": "authorization, content-type",
+  "Access-Control-Allow-Methods": "POST, OPTIONS",
+};
+
+const MAX_BATCH = 500;
+
+const json = (body: unknown, status = 200) =>
+  new Response(JSON.stringify(body), {
+    status,
+    headers: { ...CORS, "content-type": "application/json" },
+  });
+
+async function sha256Hex(value: string): Promise<string> {
+  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(value));
+  return [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, "0")).join("");
+}
+
+const iso = (t: unknown) =>
+  typeof t === "number" && isFinite(t) ? new Date(t * 1000).toISOString() : null;
+
+const num = (v: unknown) => (typeof v === "number" && isFinite(v) ? v : null);
+
+type AgentEvent = Record<string, unknown>;
+
+Deno.serve(async (req) => {
+  if (req.method === "OPTIONS") return new Response("ok", { headers: CORS });
+  if (req.method !== "POST") return json({ error: "method not allowed" }, 405);
+
+  const auth = req.headers.get("authorization") ?? "";
+  const token = auth.startsWith("Bearer ") ? auth.slice(7).trim() : "";
+  if (!token) return json({ error: "missing device token" }, 401);
+
+  let body: { events?: AgentEvent[]; passes?: AgentEvent[] };
+  try {
+    body = await req.json();
+  } catch {
+    return json({ error: "invalid json" }, 400);
+  }
+
+  const events = body.events ?? [];
+  const passes = body.passes ?? [];
+  if (events.length + passes.length > MAX_BATCH) {
+    return json({ error: `batch too large, max ${MAX_BATCH}` }, 413);
+  }
+
+  const admin = createClient(
+    Deno.env.get("SUPABASE_URL")!,
+    Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
+  );
+
+  const { data: device } = await admin
+    .from("devices")
+    .select("id, status")
+    .eq("token_hash", await sha256Hex(token))
+    .maybeSingle();
+
+  // Same response for unknown and revoked, so a probe learns nothing.
+  if (!device || device.status !== "active") return json({ error: "unauthorized" }, 401);
+
+  const { data: sensorRows } = await admin
+    .from("sensors")
+    .select("id, camera_id")
+    .eq("device_id", device.id);
+
+  const sensorByCamera = new Map((sensorRows ?? []).map((s) => [s.camera_id, s.id]));
+  const skipped: string[] = [];
+
+  const detectionRows = [];
+  for (const e of events) {
+    const sensor_id = sensorByCamera.get(String(e.camera ?? ""));
+    const started_at = iso(e.start);
+    const ended_at = iso(e.end);
+    if (!sensor_id || !started_at || !ended_at || typeof e.id !== "string") {
+      skipped.push(String(e.id ?? "?"));
+      continue;
+    }
+    const best = Array.isArray(e.aircraft) && e.aircraft.length
+      ? (e.aircraft[0] as Record<string, unknown>)
+      : null;
+    detectionRows.push({
+      event_id: e.id,
+      sensor_id,
+      device_id: device.id,
+      // The agent ships a wind flag, not a classification. Anything it believes
+      // is wind is stored as noise so the public view never shows it.
+      class: e.likely_wind ? "noise" : "unknown",
+      started_at,
+      ended_at,
+      duration_s: num(e.duration_s) ?? 0,
+      peak_db: num(e.peak_db),
+      floor_db: num(e.floor_db),
+      snr_db: num(e.snr_db),
+      dominant_hz: num(e.dominant_hz),
+      low_tilt_db: num(e.low_tilt_db),
+      likely_wind: Boolean(e.likely_wind),
+      octave_db: e.octave_db ?? null,
+      match_hex: best ? String(best.hex ?? "") || null : null,
+      match_flight: best ? (best.flight as string | null) ?? null : null,
+      match_type: best ? (best.type as string | null) ?? null : null,
+      match_slant_m: best ? num(best.slant_m) : null,
+      match_alt_m: best ? num(best.alt_m) : null,
+      match_bearing: best ? num(best.bearing_deg) : null,
+      match_delay_s: best ? num(best.delay_s) : null,
+      has_clip: Boolean(e.clip),
+    });
+  }
+
+  const passRows = [];
+  for (const p of passes) {
+    const sensor_id = sensorByCamera.get(String(p.camera ?? ""));
+    const closest_at = iso(p.closest_time);
+    if (!sensor_id || !closest_at || typeof p.hex !== "string") continue;
+    passRows.push({
+      sensor_id,
+      device_id: device.id,
+      hex: p.hex,
+      flight: (p.flight as string | null) ?? null,
+      aircraft_type: (p.type as string | null) ?? null,
+      registration: (p.reg as string | null) ?? null,
+      closest_at,
+      min_slant_m: num(p.min_slant_m) ?? 0,
+      alt_m: num(p.alt_m),
+      elevation_deg: num(p.elevation_deg),
+      heard: Boolean(p.heard),
+      event_ids: Array.isArray(p.event_ids) ? p.event_ids : [],
+    });
+  }
+
+  let detections = 0;
+  let passCount = 0;
+
+  if (detectionRows.length) {
+    const { error, count } = await admin
+      .from("detections")
+      .upsert(detectionRows, { onConflict: "device_id,event_id", ignoreDuplicates: true, count: "exact" });
+    if (error) return json({ error: "detection insert failed", detail: error.message }, 400);
+    detections = count ?? detectionRows.length;
+  }
+
+  if (passRows.length) {
+    const { error, count } = await admin
+      .from("passes")
+      .upsert(passRows, { onConflict: "device_id,hex,closest_at", ignoreDuplicates: true, count: "exact" });
+    if (error) return json({ error: "pass insert failed", detail: error.message }, 400);
+    passCount = count ?? passRows.length;
+  }
+
+  await admin
+    .from("devices")
+    .update({ last_seen_at: new Date().toISOString() })
+    .eq("id", device.id);
+
+  return json({ ok: true, detections, passes: passCount, skipped: skipped.slice(0, 10) });
+});

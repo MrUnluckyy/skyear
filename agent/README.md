@@ -72,3 +72,27 @@ see `tests/test_detector.py::engine` for the signal used by the test suite.
 - `.env` is loaded automatically for local runs (`--env` to point elsewhere).
   Variables already in the environment win, so Docker Compose's `env_file`
   behaviour is unchanged.
+
+## Pairing with the cloud
+
+Set `cloud.url` in `config.yaml`, generate a code at `/devices` in the web app,
+then on the machine with the camera:
+
+```bash
+.venv/bin/python -m skyear.main --config config.yaml --data ./out --pair ABCD2345
+```
+
+The code is single-use and expires in 15 minutes. On success the device token is
+written to `out/device.json` (mode 0600) and the agent uploads on every run.
+
+What actually crosses the network:
+- **At pairing:** camera ids and a location rounded to ~110 m. Never an address,
+  username, or password.
+- **Afterwards:** event and pass records only. Clips stay on the device.
+
+`events.jsonl` and `passes.jsonl` are the outbox. A byte offset in
+`out/upload_state.json` is committed only after the server accepts a batch, so a
+dropped connection replays rather than loses - and ingest is idempotent by
+database constraint, so re-sending cannot duplicate rows.
+
+To un-pair, delete `out/device.json` and revoke the device in the web app.

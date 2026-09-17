@@ -19,6 +19,7 @@ from .adsb import AdsbTracker
 from .audio import AudioSource, build_url
 from .detector import BandEnergyDetector
 from .matcher import PassTracker, match_event
+from .uploader import CloudError, Uploader, pair
 
 log = logging.getLogger("skyear")
 
@@ -180,6 +181,53 @@ def _scrub(text: str, secret: str) -> str:
     return text.replace(quote(secret, safe=""), "***").replace(secret, "***")
 
 
+def device_file(out_dir: Path) -> Path:
+    """Where the device token lives. Inside the data dir, which is gitignored."""
+    return out_dir / "device.json"
+
+
+def make_uploader(cfg, out_dir: Path):
+    """Build an Uploader if this agent has been paired, else None."""
+    cloud = cfg.get("cloud", {})
+    url = cloud.get("url")
+    if not url:
+        return None
+    path = device_file(out_dir)
+    if not path.is_file():
+        log.warning("cloud.url is set but this agent is not paired yet - run --pair CODE")
+        return None
+    try:
+        token = json.loads(path.read_text())["token"]
+    except (OSError, json.JSONDecodeError, KeyError):
+        log.error("%s is unreadable; re-pair with --pair CODE", path)
+        return None
+    return Uploader(url, token, out_dir, interval_s=cloud.get("upload_interval_s", 30))
+
+
+def run_pair(cfg, cams, out_dir: Path, code: str):
+    cloud = cfg.get("cloud", {})
+    url = cloud.get("url")
+    if not url:
+        print("FAIL set cloud.url in config.yaml first")
+        return 1
+    path = device_file(out_dir)
+    if path.is_file():
+        print(f"FAIL already paired ({path}). Delete that file to pair again.")
+        return 1
+    try:
+        res = pair(url, code, cams, name=cloud.get("device_name", "SkyEar agent"))
+    except CloudError as e:
+        print(f"FAIL {e}")
+        return 1
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(res, indent=1))
+    path.chmod(0o600)  # the token is a credential
+    print(f"OK paired as device {res['device_id']}")
+    print(f"   cameras: {', '.join(res.get('cameras', []))}")
+    print(f"   token stored in {path} (never commit it)")
+    return 0
+
+
 def run_check(cfg, cams, a):
     import subprocess
     ok = True
@@ -221,6 +269,8 @@ def main():
     ap.add_argument("--replay", help="analyse a local audio file instead of cameras (no ADS-B matching)")
     ap.add_argument("--env", default=os.environ.get("SKYEAR_ENV", ".env"),
                     help="file to read camera passwords from (default: .env)")
+    ap.add_argument("--pair", metavar="CODE",
+                    help="pair this agent with an account using a code from the web app")
     args = ap.parse_args()
     load_env_file(Path(args.env))
 
@@ -241,6 +291,8 @@ def main():
 
     a = cfg.get("adsb", {})
     cams = cfg["cameras"]
+    if args.pair:
+        return run_pair(cfg, cams, out_dir, args.pair)
     if args.check:
         return run_check(cfg, cams, a)
     adsb = AdsbTracker(a.get("provider", "adsb.lol"), a.get("lat", cams[0]["lat"]), a.get("lon", cams[0]["lon"]),
@@ -249,6 +301,11 @@ def main():
     threading.Thread(target=adsb.run, args=(stop,), daemon=True, name="adsb").start()
     threading.Thread(target=cleanup_loop, args=(out_dir, cfg.get("clips", {}).get("keep_days", 14), stop),
                      daemon=True, name="cleanup").start()
+    uploader = make_uploader(cfg, out_dir)
+    if uploader:
+        threading.Thread(target=uploader.run, args=(stop,), daemon=True, name="upload").start()
+        log.info("cloud upload enabled")
+
     threads = [threading.Thread(target=camera_worker, args=(c, cfg, adsb, out_dir, events_w, passes_w, stop),
                                 daemon=True, name=f"cam-{c['id']}") for c in cams]
     for th in threads:

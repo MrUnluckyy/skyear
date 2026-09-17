@@ -45,3 +45,9 @@ clips:
   save: true                # clips stay on this device
   pre_roll_s: 5
   keep_days: 14
+
+cloud:
+  # Leave url unset to keep everything on this device.
+  url: https://kzeghlzmbxeldrmoxdrl.supabase.co
+  device_name: home-nas
+  upload_interval_s: 30
