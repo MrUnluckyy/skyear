@@ -13,6 +13,9 @@ type Step = {
   title: string;
   body: string;
   code?: string;
+  /** Browser steps link rather than printing a URL: the reader is already in a
+   *  browser, and a hardcoded domain is wrong on every other deployment. */
+  link?: { href: string; label: string };
   expect?: string;
   stuck?: { problem: string; fix: string }[];
 };
@@ -26,8 +29,8 @@ const STEPS: Step[] = [
   {
     where: "browser",
     title: "Create your account",
-    body: "Open the sign-in page and enter your email. You get a one-time link by email — there is no password to choose. Click the link and you land on your sensors page.",
-    code: "https://skyear.app/login",
+    body: "Enter your email on the sign-in page. You get a one-time link by email — there is no password to choose. Click it and you land on your sensors page.",
+    link: { href: "/login", label: "Open the sign-in page" },
     expect: "After clicking the emailed link you see a page titled Sensors, with your email under it and no devices listed yet.",
     stuck: [
       {
@@ -155,8 +158,8 @@ Then put the camera password in .env:  nano .env`,
   {
     where: "browser",
     title: "Generate a pairing code",
-    body: "Go to your sensors page and press Generate pairing code. A short code appears, along with the exact command to run, with the code already filled in.",
-    code: "https://skyear.app/devices",
+    body: "Press Generate pairing code on your sensors page. A short code appears, with the exact command to run beneath it, your code already filled in.",
+    link: { href: "/devices", label: "Open your sensors page" },
     expect: "An eight-character code such as K4M7PQR2, valid for 15 minutes and usable once.",
   },
   {
@@ -195,7 +198,7 @@ Press Ctrl+C to stop watching the log. That does not stop the agent.`,
     where: "browser",
     title: "Confirm it arrived",
     body: "Open the map. Within about a minute your sensor appears with rings collapsing into it, and the panel starts counting passes.",
-    code: "https://skyear.app",
+    link: { href: "/", label: "Open the map" },
     expect: "A dot where your camera is, labelled listening, and a rising count of aircraft under it.",
     stuck: [
       {
@@ -248,6 +251,15 @@ function StepBlock({ index, step }: { index: number; step: Step }) {
         <Where where={step.where} />
         <h3 className="mt-3 text-[18px] text-bone">{step.title}</h3>
         <p className="mt-2 max-w-[62ch] text-[14px] leading-relaxed text-slate">{step.body}</p>
+
+        {step.link && (
+          <a
+            href={step.link.href}
+            className="mt-4 inline-block border border-sodium/50 px-3 py-1.5 text-[13px] text-sodium hover:bg-sodium/10"
+          >
+            {step.link.label}
+          </a>
+        )}
 
         {step.code && (
           <pre className="scroll-thin mt-4 overflow-x-auto border border-edge bg-night-deep p-4 font-mono text-[12.5px] leading-relaxed text-frost/90">
