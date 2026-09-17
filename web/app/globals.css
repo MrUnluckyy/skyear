@@ -77,22 +77,35 @@ body {
   to   { opacity: 0; transform: scaleX(1); }
 }
 
+/* Held while a sound is actually being heard, so the sensor reads as active
+   rather than merely present. */
+@keyframes sustain {
+  0%, 100% { transform: scale(1); box-shadow: 0 0 10px 0 rgba(87, 209, 168, 0.6); }
+  50% { transform: scale(1.22); box-shadow: 0 0 20px 6px rgba(87, 209, 168, 0.25); }
+}
+
 @keyframes breathe {
   0%, 100% { opacity: 0.35; }
   50% { opacity: 0.8; }
 }
 
 .ring-arrive { animation: arrive 3.4s cubic-bezier(0.3, 0, 0.2, 1) infinite; }
+/* Wavefronts arrive faster when there is more to hear. */
+.ring-rising  { animation-duration: 2s; }
+.ring-hearing { animation-duration: 1.15s; }
+.ring-warming { animation-duration: 5s; }
 .ear-flare { animation: flare 1.1s ease-out; }
 .bearing-ray { animation: bearing-sweep 2.4s ease-out forwards; transform-origin: left center; }
 .breathe { animation: breathe 3.4s ease-in-out infinite; }
+.sustain { animation: sustain 1.15s ease-in-out infinite; }
 
 /* Silence every ambient loop for anyone who asked for less motion. */
 @media (prefers-reduced-motion: reduce) {
   .ring-arrive,
   .ear-flare,
   .bearing-ray,
-  .breathe {
+  .breathe,
+  .sustain {
     animation: none;
   }
   .ring-arrive { opacity: 0.28; }

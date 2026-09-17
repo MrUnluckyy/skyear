@@ -50,4 +50,4 @@ cloud:
   # Leave url unset to keep everything on this device.
   url: https://kzeghlzmbxeldrmoxdrl.supabase.co
   device_name: home-nas
-  upload_interval_s: 30
+  upload_interval_s: 10      # also the liveness heartbeat for the map

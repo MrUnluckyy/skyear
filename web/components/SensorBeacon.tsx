@@ -1,6 +1,6 @@
 "use client";
 
-import { OCTAVES, type PublicDetection } from "@/lib/types";
+import { OCTAVES, type PublicDetection, type SensorPhase } from "@/lib/types";
 
 /**
  * A sensor, drawn as an ear rather than a radar station.
@@ -9,31 +9,47 @@ import { OCTAVES, type PublicDetection } from "@/lib/types";
  * at a microphone, they never leave it. Every other map in this space sweeps
  * outward, which is both a cliche and, for a passive listener, backwards.
  */
+const PHASE_STYLE: Record<SensorPhase, { colour: string; ring: string; stagger: number }> = {
+  offline: { colour: "var(--slate-dim)", ring: "", stagger: 0 },
+  warming: { colour: "var(--slate)", ring: "ring-warming", stagger: 1.67 },
+  listening: { colour: "var(--sodium)", ring: "", stagger: 1.13 },
+  rising: { colour: "var(--sodium)", ring: "ring-rising", stagger: 0.67 },
+  hearing: { colour: "var(--signal)", ring: "ring-hearing", stagger: 0.38 },
+};
+
 export function SensorBeacon({
-  online,
+  phase,
   flareKey,
   bearing,
   label,
+  detail,
 }: {
-  online: boolean;
+  phase: SensorPhase;
   flareKey: number;
   bearing: number | null;
   label: string;
+  detail?: string;
 }) {
-  const colour = online ? "var(--sodium)" : "var(--slate-dim)";
+  const { colour, ring, stagger } = PHASE_STYLE[phase];
+  const live = phase !== "offline";
+  const hearing = phase === "hearing";
 
   return (
     <div className="pointer-events-none relative" aria-hidden>
-      {/* Arriving wavefronts. Staggered so they read as a sequence, not a pulse. */}
-      {online &&
+      {/*
+        Arriving wavefronts, staggered so they read as a sequence rather than a
+        pulse. They speed up as the sensor picks something up, which is the
+        whole feedback loop: you can see it working without reading a number.
+      */}
+      {live &&
         [0, 1, 2].map((i) => (
           <span
             key={i}
-            className="ring-arrive absolute rounded-full border"
+            className={`ring-arrive ${ring} absolute rounded-full border`}
             style={{
               inset: -46,
               borderColor: colour,
-              animationDelay: `${i * 1.13}s`,
+              animationDelay: `${i * stagger}s`,
             }}
           />
         ))}
@@ -57,21 +73,24 @@ export function SensorBeacon({
         />
       )}
 
-      {/* The ear itself. */}
+      {/* The ear itself. It sustains while a sound is actually being heard. */}
       <span
         key={`ear-${flareKey}`}
-        className={`absolute block rounded-full ${flareKey > 0 ? "ear-flare" : ""}`}
+        className={`absolute block rounded-full ${hearing ? "sustain" : ""} ${
+          flareKey > 0 && !hearing ? "ear-flare" : ""
+        }`}
         style={{
-          inset: -5,
+          inset: hearing ? -7 : -5,
           background: colour,
-          boxShadow: online ? `0 0 12px ${colour}` : "none",
+          boxShadow: live ? `0 0 12px ${colour}` : "none",
         }}
       />
       <span
         className="absolute whitespace-nowrap font-mono text-[10px] tracking-tight"
-        style={{ top: 12, left: -10, color: colour }}
+        style={{ top: 14, left: -10, color: colour }}
       >
         {label}
+        {detail && <span className="ml-1 opacity-70">{detail}</span>}
       </span>
     </div>
   );

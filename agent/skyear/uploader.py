@@ -119,12 +119,16 @@ class Outbox:
 
 class Uploader:
     def __init__(self, base_url: str, token: str, data_dir: Path,
-                 interval_s: float = 30.0, max_backoff_s: float = 600.0):
+                 interval_s: float = 10.0, max_backoff_s: float = 600.0,
+                 live: dict | None = None):
         self.url = f"{base_url.rstrip('/')}/functions/v1/ingest"
         self.token = token
         self.state_path = data_dir / "upload_state.json"
         self.interval_s = interval_s
         self.max_backoff_s = max_backoff_s
+        # Live per-camera state, so the map can show what is being heard now
+        # rather than only what finished being heard.
+        self.live = live if live is not None else {}
         state = self._load_state()
         self.events = Outbox(data_dir / "events.jsonl", state.get("events_offset", 0))
         self.passes = Outbox(data_dir / "passes.jsonl", state.get("passes_offset", 0))
@@ -144,16 +148,24 @@ class Uploader:
         tmp.replace(self.state_path)  # atomic, so a crash cannot corrupt the cursor
 
     def send_once(self) -> dict | None:
-        """Upload one batch. Offsets advance only on success."""
+        """Upload one batch and the current listening state.
+
+        Status is sent even with nothing else to report - that is the whole
+        point of it, and it doubles as the liveness signal that tells the map a
+        sensor is still there.
+        """
         events, ev_next = self.events.read_batch()
         passes, pa_next = self.passes.read_batch()
-        if not events and not passes:
+        status = dict(self.live)
+        if not events and not passes and not status:
             return None
 
-        result = _post(self.url, {"events": events, "passes": passes}, token=self.token)
+        result = _post(self.url, {"events": events, "passes": passes, "status": status},
+                       token=self.token)
         self.events.offset, self.passes.offset = ev_next, pa_next
         self._save_state()
-        log.info("uploaded %d event(s), %d pass(es)", len(events), len(passes))
+        if events or passes:
+            log.info("uploaded %d event(s), %d pass(es)", len(events), len(passes))
         return result
 
     def run(self, stop: threading.Event) -> None:

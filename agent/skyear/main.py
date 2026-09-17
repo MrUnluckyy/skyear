@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import argparse
 import collections
 import datetime as dt
@@ -22,6 +24,10 @@ from .matcher import PassTracker, match_event
 from .uploader import CloudError, Uploader, pair
 
 log = logging.getLogger("skyear")
+
+# What each camera is hearing right now, refreshed every audio chunk and read by
+# the uploader. Single writer per key, so a plain dict is fine.
+LIVE: dict[str, dict] = {}
 
 
 class JsonlWriter:
@@ -114,6 +120,9 @@ def camera_worker(cam, cfg, adsb, out_dir, events_w, passes_w, stop, live=True):
             src.stop()
             break
         ring.add(t, x)
+        state = det.state()
+        state["at"] = time.time()
+        LIVE[cid] = state
         for ev in det.process(t, x):
             ev["id"] = uuid.uuid4().hex[:12]
             ev["camera"] = cid
@@ -201,7 +210,8 @@ def make_uploader(cfg, out_dir: Path):
     except (OSError, json.JSONDecodeError, KeyError):
         log.error("%s is unreadable; re-pair with --pair CODE", path)
         return None
-    return Uploader(url, token, out_dir, interval_s=cloud.get("upload_interval_s", 30))
+    return Uploader(url, token, out_dir, interval_s=cloud.get("upload_interval_s", 10),
+                    live=LIVE)
 
 
 def run_pair(cfg, cams, out_dir: Path, code: str):

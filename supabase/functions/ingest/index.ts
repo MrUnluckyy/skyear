@@ -45,7 +45,7 @@ Deno.serve(async (req) => {
   const token = auth.startsWith("Bearer ") ? auth.slice(7).trim() : "";
   if (!token) return json({ error: "missing device token" }, 401);
 
-  let body: { events?: AgentEvent[]; passes?: AgentEvent[] };
+  let body: { events?: AgentEvent[]; passes?: AgentEvent[]; status?: Record<string, AgentEvent> };
   try {
     body = await req.json();
   } catch {
@@ -160,10 +160,41 @@ Deno.serve(async (req) => {
     passCount = count ?? passRows.length;
   }
 
+  /*
+   * Live listening state. Overwritten in place per sensor, never appended, so
+   * it cannot grow and keeps no record of when a sensor was quiet. This is what
+   * lets the map show what is being heard *now* - the event stream only reports
+   * a sound once it has finished.
+   */
+  let live = 0;
+  const statusRows = [];
+  for (const [camera, raw] of Object.entries(body.status ?? {})) {
+    const sensor_id = sensorByCamera.get(camera);
+    if (!sensor_id) continue;
+    statusRows.push({
+      sensor_id,
+      device_id: device.id,
+      level_db: num(raw.level_db),
+      floor_db: num(raw.floor_db),
+      excess_db: num(raw.excess_db),
+      rising: Boolean(raw.rising),
+      event_active: Boolean(raw.event_active),
+      event_s: num(raw.event_s) ?? 0,
+      warm: Boolean(raw.warm),
+      reported_at: new Date().toISOString(),
+    });
+  }
+  if (statusRows.length) {
+    const { error } = await admin
+      .from("sensor_status")
+      .upsert(statusRows, { onConflict: "sensor_id" });
+    if (!error) live = statusRows.length;
+  }
+
   await admin
     .from("devices")
     .update({ last_seen_at: new Date().toISOString() })
     .eq("id", device.id);
 
-  return json({ ok: true, detections, passes: passCount, skipped: skipped.slice(0, 10) });
+  return json({ ok: true, detections, passes: passCount, live, skipped: skipped.slice(0, 10) });
 });

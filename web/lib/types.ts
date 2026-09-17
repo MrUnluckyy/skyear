@@ -4,7 +4,36 @@ export type PublicSensor = {
   status: string;
   lat: number;
   lon: number;
+  /** Reported within the last 45 s. The agent heartbeats every 10 s. */
   online: boolean;
+  /** A sound is crossing the threshold at this instant. */
+  hearing_now: boolean;
+  /** Something has started rising but has not lasted long enough to count. */
+  rising: boolean;
+  hearing_for_s: number;
+  /** How far above this sensor's own noise floor, in dB. */
+  excess_db: number | null;
+  /** False until the rolling noise floor has settled. */
+  warm: boolean;
+  reported_at: string | null;
+};
+
+export type SensorPhase = "offline" | "warming" | "listening" | "rising" | "hearing";
+
+export function sensorPhase(s: PublicSensor): SensorPhase {
+  if (!s.online) return "offline";
+  if (s.hearing_now) return "hearing";
+  if (s.rising) return "rising";
+  if (!s.warm) return "warming";
+  return "listening";
+}
+
+export const PHASE_LABEL: Record<SensorPhase, string> = {
+  offline: "offline",
+  warming: "warming up",
+  listening: "listening",
+  rising: "something starting",
+  hearing: "hearing something",
 };
 
 /**

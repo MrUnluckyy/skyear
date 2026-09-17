@@ -40,6 +40,7 @@ class BandEnergyDetector:
         self.active = None  # list of frames in event
         self.below = 0
         self.floor = None
+        self.last_db = None
 
     def _frame(self, x):
         spec = np.abs(np.fft.rfft(x * self.win)) ** 2 + 1e-20
@@ -64,8 +65,31 @@ class BandEnergyDetector:
                 out.append(ev)
         return out
 
+    def state(self) -> dict:
+        """What this detector is hearing right now.
+
+        The event stream only reports a sound once it has *ended*, so a live
+        view needs this: the current level against the rolling floor, and
+        whether a candidate or event is open at this instant.
+        """
+        level = self.last_db
+        floor = self.floor
+        return {
+            "level_db": None if level is None else round(float(level), 1),
+            "floor_db": None if floor is None else round(float(floor), 1),
+            "excess_db": None if level is None or floor is None else round(float(level - floor), 1),
+            # A candidate has crossed the threshold but not yet lasted long
+            # enough to count - worth showing, because that is the moment a
+            # listener would say "something is starting".
+            "rising": bool(self.cand) and self.active is None,
+            "event_active": self.active is not None,
+            "event_s": round(len(self.active) * self.frame_s, 1) if self.active else 0.0,
+            "warm": self.seen > self.warmup_frames,
+        }
+
     def _step(self, t, x):
         db, peak_f, octs = self._frame(x)
+        self.last_db = db
         self.seen += 1
         floor = float(np.percentile(self.hist, self.pct)) if len(self.hist) > 10 else db
         self.floor = floor

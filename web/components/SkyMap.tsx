@@ -6,8 +6,10 @@ import type { GeoJSONSource } from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
 import { createClient } from "@/lib/supabase";
 import {
+  PHASE_LABEL,
   noiseBaseline,
   observedWindow,
+  sensorPhase,
   type Aircraft,
   type PublicDetection,
   type PublicSensor,
@@ -270,11 +272,21 @@ export default function SkyMap() {
       if (Object.keys(fresh).length) setFlares((prev) => ({ ...prev, ...fresh }));
     };
 
+    // Sensor liveness is polled faster than history: the agent heartbeats every
+    // 10 s, and a "hearing something right now" badge is worthless if it lags.
+    const loadLive = async () => {
+      const s = await supabase.from("public_sensors").select("*");
+      if (!alive || s.error) return;
+      setSensors((s.data as PublicSensor[]) ?? []);
+    };
+
     load();
-    const id = setInterval(load, 30_000);
+    const slow = setInterval(load, 30_000);
+    const fast = setInterval(loadLive, 5_000);
     return () => {
       alive = false;
-      clearInterval(id);
+      clearInterval(slow);
+      clearInterval(fast);
     };
   }, []);
 
@@ -304,6 +316,7 @@ export default function SkyMap() {
   const airborne = aircraft.filter((a) => a.alt_m > 0).length;
   const newest = detections[0] ?? null;
   const online = sensors.filter((s) => s.online).length;
+  const hearing = sensors.filter((s) => s.hearing_now).length;
 
   return (
     <div className="relative h-dvh w-full overflow-hidden bg-night-deep">
@@ -324,13 +337,19 @@ export default function SkyMap() {
           if (!p) return null;
           const flare = flares[s.id] ?? 0;
           const bearing = flare && newest?.sensor_id === s.id ? newest.match_bearing : null;
+          const phase = sensorPhase(s);
           return (
             <div key={s.id} className="absolute" style={{ left: p.x, top: p.y }}>
               <SensorBeacon
-                online={s.online}
+                phase={phase}
                 flareKey={flare}
                 bearing={bearing}
-                label={s.online ? "listening" : "offline"}
+                label={PHASE_LABEL[phase]}
+                detail={
+                  phase === "hearing" && s.hearing_for_s >= 1
+                    ? `${Math.round(s.hearing_for_s)}s`
+                    : undefined
+                }
               />
             </div>
           );
@@ -357,12 +376,20 @@ export default function SkyMap() {
           <p className="mt-3 flex items-center gap-2 text-[12px]">
             <span
               className="breathe inline-block h-1.5 w-1.5 rounded-full"
-              style={{ background: online ? "var(--sodium)" : "var(--slate-dim)" }}
+              style={{
+                background: hearing
+                  ? "var(--signal)"
+                  : online
+                    ? "var(--sodium)"
+                    : "var(--slate-dim)",
+              }}
             />
             <span className="text-slate">
-              {online > 0
-                ? `${online} sensor${online > 1 ? "s" : ""} listening`
-                : "No sensor listening"}
+              {hearing > 0
+                ? `${hearing} sensor${hearing > 1 ? "s" : ""} hearing something`
+                : online > 0
+                  ? `${online} sensor${online > 1 ? "s" : ""} listening`
+                  : "No sensor listening"}
             </span>
           </p>
         </header>
