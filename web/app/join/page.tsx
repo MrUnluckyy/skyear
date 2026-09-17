@@ -125,7 +125,7 @@ Then put the camera password in .env:  nano .env`,
     stuck: [
       {
         problem: "Which stream type do I pick?",
-        fix: "reolink, hikvision or dahua are handled directly. Anything else: use generic and give it the RTSP path.",
+        fix: "reolink, hikvision, dahua and ubiquiti are handled directly. Anything else: set url_env and supply the whole URL.",
       },
     ],
   },
@@ -349,6 +349,68 @@ export default function Join() {
               </li>
             ))}
           </ul>
+        </section>
+
+        <section className="mt-16 border border-edge">
+          <h2 className="border-b border-edge px-6 py-4 text-[15px] text-bone">
+            Find your camera&rsquo;s stream
+          </h2>
+
+          <div className="border-b border-edge p-6">
+            <p className="text-[13px] text-frost">Reolink, Hikvision, Dahua</p>
+            <p className="mt-2 max-w-[62ch] text-[13px] leading-relaxed text-slate">
+              Handled directly. Give the agent the camera&rsquo;s address, a username and a
+              password, and it builds the stream URL itself. Check RTSP is enabled on the camera,
+              usually under Network or Advanced.
+            </p>
+          </div>
+
+          {/* Genuinely different, and the difference trips people up. */}
+          <div className="border-b border-edge p-6">
+            <p className="text-[13px] text-sodium">Ubiquiti UniFi Protect</p>
+            <p className="mt-2 max-w-[62ch] text-[13px] leading-relaxed text-slate">
+              Works unlike the rest, so it gets its own path. The stream comes from your{" "}
+              <strong className="font-normal text-bone">NVR or UDM</strong>, not the camera, over
+              RTSPS on port 7441 — and there is no username or password. A per-camera token in the
+              URL is the credential, which is why it goes in <code>.env</code> and never in{" "}
+              <code>config.yaml</code>.
+            </p>
+            <ol className="mt-3 max-w-[62ch] space-y-1 text-[13px] leading-relaxed text-slate">
+              <li>
+                1. In UniFi Protect, open the camera → Settings → Advanced → enable{" "}
+                <strong className="font-normal text-bone">RTSP</strong> for one quality. Low or
+                Medium is plenty; the audio is the same on every quality.
+              </li>
+              <li>2. Copy the URL it shows you. It looks like the line below.</li>
+              <li>3. Take the token — the part after the last slash — and put that in .env.</li>
+            </ol>
+            <pre className="scroll-thin mt-3 overflow-x-auto border border-edge bg-night-deep p-4 font-mono text-[12.5px] leading-relaxed text-frost/90">
+{`rtsps://192.168.1.1:7441/aBcDeF123456?enableSrtp
+                         └──── this is the token ────┘
+
+# config.yaml
+  - id: gate
+    type: ubiquiti
+    host: 192.168.1.1          # the NVR, not the camera
+    password_env: CAM2_STREAM
+
+# .env
+CAM2_STREAM=aBcDeF123456`}
+            </pre>
+            <p className="mt-3 max-w-[62ch] text-[12px] leading-relaxed text-slate-dim">
+              Protect regenerates the token if you disable and re-enable RTSP, so the stream stops
+              until you paste the new one. The agent masks the token in its logs.
+            </p>
+          </div>
+
+          <div className="p-6">
+            <p className="text-[13px] text-frost">Anything else</p>
+            <p className="mt-2 max-w-[62ch] text-[13px] leading-relaxed text-slate">
+              If you can get a working RTSP URL out of the camera by any means, put the whole thing
+              in <code>.env</code> and point <code>url_env</code> at it. The agent will use it
+              verbatim.
+            </p>
+          </div>
         </section>
 
         <section className="mt-16">

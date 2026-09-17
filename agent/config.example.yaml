@@ -10,7 +10,7 @@ adsb:
 
 cameras:
   - id: home-1
-    type: reolink           # reolink | hikvision | dahua | generic (then set path:)
+    type: reolink           # reolink | hikvision | dahua | ubiquiti | generic
     host: 192.168.1.50
     port: 554
     channel: 1
@@ -41,6 +41,21 @@ matching:
   max_fix_age_s: 60         # ignore ADS-B fixes older than this (parked transponders)
   track_ground: false       # surface traffic is not an aircraft pass
   reopen_cooldown_s: 120    # stops one pass splitting into duplicates across an ADS-B gap
+
+# UniFi Protect works differently from the others. Enable RTSP per camera in
+# Protect (Settings -> Advanced -> RTSP), copy the stream URL it shows, and take
+# the token from the end of the path. There is no username or password: that
+# token is the credential, so it goes in .env.
+#
+#  - id: gate
+#    type: ubiquiti
+#    host: 192.168.1.1          # the NVR / UDM, not the camera
+#    password_env: CAM2_STREAM  # the token from the Protect URL
+#
+# Anything else that neither builder handles can supply a whole URL instead:
+#
+#  - id: odd-one
+#    url_env: CAM3_URL          # the complete rtsp:// or rtsps:// URL
 
 clips:
   save: true                # clips stay on this device

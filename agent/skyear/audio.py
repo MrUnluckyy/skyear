@@ -17,26 +17,58 @@ STREAM_PATHS = {
 }
 
 
-def build_url(cam: dict, password: str) -> str:
+# UniFi Protect works unlike every other brand here: the stream comes from the
+# NVR rather than the camera, over RTSPS on 7441, and there is no username or
+# password - a per-camera token in the path IS the credential. It is generated
+# by Protect and cannot be derived, so it has to be read from the UI and, being
+# a secret, it belongs in .env rather than config.yaml.
+UBIQUITI_PORT = 7441
+
+
+def build_url(cam: dict, secret: str) -> str:
+    """Build the stream URL. `secret` is the camera password, or for UniFi the
+    stream token, whichever that camera type uses."""
     if cam.get("file"):
         return cam["file"]
+
+    # A full URL supplied wholesale, for anything the builders cannot express.
+    if cam.get("url_env"):
+        return secret
+
     ctype = cam.get("type", "reolink")
     ch = int(cam.get("channel", 1))
+
+    if ctype == "ubiquiti":
+        port = cam.get("port", UBIQUITI_PORT)
+        # enableSrtp is required by Protect; without it the stream is refused.
+        return f"rtsps://{cam['host']}:{port}/{secret}?enableSrtp"
+
     if ctype == "generic":
         path = cam["path"]
     else:
         main, sub = STREAM_PATHS[ctype]
         path = (sub if cam.get("stream", "sub") == "sub" else main).format(ch=ch)
     user = quote(cam.get("username", "admin"), safe="")
-    pw = quote(password, safe="")
+    pw = quote(secret, safe="")
     port = cam.get("port", 554)
     return f"rtsp://{user}:{pw}@{cam['host']}:{port}{path}"
 
 
 def redact(url: str) -> str:
-    if "@" in url and "://" in url:
-        scheme, rest = url.split("://", 1)
+    """Strip credentials before a URL reaches a log.
+
+    Two shapes carry secrets: the usual user:pass@host, and UniFi's rtsps URL
+    where the path token is itself the credential. Masking only the first would
+    have printed a working stream key into the log file.
+    """
+    if "://" not in url:
+        return url
+    scheme, rest = url.split("://", 1)
+    if "@" in rest:
         return f"{scheme}://***@{rest.split('@', 1)[1]}"
+    if scheme == "rtsps" and "/" in rest:
+        host = rest.split("/", 1)[0]
+        return f"{scheme}://{host}/***"
     return url
 
 

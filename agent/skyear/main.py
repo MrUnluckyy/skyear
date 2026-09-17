@@ -84,9 +84,12 @@ def camera_worker(cam, cfg, adsb, out_dir, events_w, passes_w, stop, live=True):
     cid = cam["id"]
     sensor = {"lat": cam["lat"], "lon": cam["lon"],
               "alt_m": cam.get("elevation_m", 0) + cam.get("mount_height_m", 0)}
-    password = os.environ.get(cam.get("password_env", ""), "") if not cam.get("file") else ""
-    if not cam.get("file") and not password and cam.get("password_env"):
-        log.error("[%s] env var %s is empty, skipping camera", cid, cam.get("password_env"))
+    # For UniFi this is the stream token rather than a password; either way it
+    # is the one secret that camera needs and it lives only in .env.
+    secret_env = cam.get("url_env") or cam.get("password_env", "")
+    password = os.environ.get(secret_env, "") if not cam.get("file") else ""
+    if not cam.get("file") and not password and secret_env:
+        log.error("[%s] env var %s is empty, skipping camera", cid, secret_env)
         return
     sr = 16000
     det = BandEnergyDetector(sr=sr, **cfg.get("detector", {}))
@@ -242,9 +245,10 @@ def run_check(cfg, cams, a):
     import subprocess
     ok = True
     for c in cams:
-        pw = os.environ.get(c.get("password_env", ""), "")
-        if c.get("password_env") and not pw:
-            print(f"[{c['id']}] FAIL {c['password_env']} is not set "
+        secret_env = c.get("url_env") or c.get("password_env", "")
+        pw = os.environ.get(secret_env, "")
+        if secret_env and not pw:
+            print(f"[{c['id']}] FAIL {secret_env} is not set "
                   f"(put it in .env, or export it before running)")
             ok = False
             continue
