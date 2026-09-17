@@ -1,0 +1,21 @@
+-- PostGIS installed into `public` exposes spatial_ref_sys through PostgREST
+-- with no RLS (an ERROR-level advisor lint) and publishes its SECURITY DEFINER
+-- helpers (st_estimatedextent) to the anon role. Moved to a dedicated schema.
+--
+-- Applied while the database held no rows, so the tables are simply rebuilt
+-- with extensions-qualified types rather than migrated in place. After this,
+-- `get_advisors(type: security)` returns zero lints.
+--
+-- The full body as applied is identical to 0001 with these substitutions:
+--   geography(point, 4326)  ->  extensions.geography(point, 4326)
+--   st_snaptogrid(...)      ->  extensions.st_snaptogrid(...)
+--   ::geometry / ::geography -> ::extensions.geometry / ::extensions.geography
+-- preceded by:
+--   drop view/table/extension cascade
+--   create schema extensions;
+--   grant usage on schema extensions to postgres, anon, authenticated, service_role;
+--   create extension postgis with schema extensions;
+--
+-- See supabase/migrations/0001_initial_schema.sql for the annotated original,
+-- and `supabase db pull` to regenerate this file verbatim from the project once
+-- the CLI is set up.

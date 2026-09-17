@@ -1,5 +1,8 @@
 -- SkyEar initial schema.
 --
+-- NOTE: superseded by 0002, which moves PostGIS out of the public schema.
+-- The live database matches 0002. Keep this file for the annotated rationale.
+--
 -- Column shapes come from real agent output (events.jsonl / passes.jsonl), not
 -- from guesswork. The privacy rules in CLAUDE.md are enforced here, in the
 -- database, rather than in the UI: exact sensor coordinates never leave this
