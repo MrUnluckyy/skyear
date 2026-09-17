@@ -32,6 +32,7 @@ detector:
   floor_window_s: 180
   floor_percentile: 20
   warmup_s: 30
+  wind_tilt_db: 20          # 50-100 Hz minus 200-400 Hz above this = wind, not aircraft
 
 matching:
   max_range_m: 12000        # aircraft further than this are not linked to a sound

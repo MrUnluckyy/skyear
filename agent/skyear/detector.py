@@ -15,7 +15,8 @@ OCTAVES = [(50, 100), (100, 200), (200, 400), (400, 800), (800, 1600), (1600, 32
 class BandEnergyDetector:
     def __init__(self, sr=16000, frame_s=0.5, band_hz=(50, 2000), threshold_db=8.0,
                  release_db=4.0, min_duration_s=4.0, release_s=3.0, max_event_s=240.0,
-                 floor_window_s=180.0, floor_percentile=20.0, warmup_s=30.0):
+                 floor_window_s=180.0, floor_percentile=20.0, warmup_s=30.0,
+                 wind_tilt_db=20.0):
         self.sr = sr
         self.n = int(sr * frame_s)
         self.frame_s = self.n / sr
@@ -31,6 +32,7 @@ class BandEnergyDetector:
         self.hist = collections.deque(maxlen=int(floor_window_s / self.frame_s))
         self.pct = floor_percentile
         self.warmup_frames = int(warmup_s / self.frame_s)
+        self.wind_tilt_db = wind_tilt_db
         self.seen = 0
         self.pending = np.zeros(0, dtype=np.float32)
         self.pending_t = None
@@ -95,6 +97,11 @@ class BandEnergyDetector:
         dbs = np.array([f[1] for f in frames])
         pk = int(np.argmax(dbs))
         octs = np.array([f[3] for f in frames]).mean(axis=0)
+        by_band = {f"{lo}-{hi}": round(float(v), 1) for (lo, hi), v in zip(OCTAVES, octs)}
+        # Wind is concentrated below ~100 Hz and falls away steeply; an aircraft
+        # puts real energy into 100-400 Hz. The gap between those bands
+        # separates the two cheaply, using features already computed.
+        tilt = by_band["50-100"] - by_band["200-400"]
         return {
             "start": float(ts[0]),
             "end": float(ts[-1] + self.frame_s),
@@ -104,5 +111,7 @@ class BandEnergyDetector:
             "floor_db": round(float(self.event_floor), 1),
             "snr_db": round(float(dbs[pk] - self.event_floor), 1),
             "dominant_hz": round(float(np.median([f[2] for f in frames])), 1),
-            "octave_db": {f"{lo}-{hi}": round(float(v), 1) for (lo, hi), v in zip(OCTAVES, octs)},
+            "octave_db": by_band,
+            "low_tilt_db": round(float(tilt), 1),
+            "likely_wind": bool(tilt >= self.wind_tilt_db),
         }

@@ -133,12 +133,17 @@ def camera_worker(cam, cfg, adsb, out_dir, events_w, passes_w, stop, live=True):
                         w.writeframes(audio.tobytes())
                     ev["clip"] = str(p.relative_to(out_dir))
             events_w.write(ev)
-            if pt:
+            # Wind is still written and clipped - it is training data for a
+            # future noise class - but it must never mark an aircraft as heard,
+            # or the detection rate this project is judged on becomes fiction.
+            if pt and not ev.get("likely_wind"):
                 pt.add_event(ev, best["hex"] if best else None)
             what = (f"{best.get('flight') or best['hex']} {best.get('type') or '?'} "
                     f"{best['slant_m']/1000:.1f} km, alt {best['alt_m']} m") if best else "no aircraft match"
-            log.info("[%s] HEARD %.0fs SNR %.1f dB ~%.0f Hz -> %s",
-                     cid, ev["duration_s"], ev["snr_db"], ev["dominant_hz"], what)
+            log.info("[%s] %s %.0fs SNR %.1f dB ~%.0f Hz tilt %.0f dB -> %s",
+                     cid, "WIND " if ev.get("likely_wind") else "HEARD",
+                     ev["duration_s"], ev["snr_db"], ev["dominant_hz"],
+                     ev["low_tilt_db"], what)
         if live and time.time() - last_beat > 60 and det.floor is not None:
             log.info("[%s] alive, noise floor %.1f dB", cid, det.floor)
             last_beat = time.time()
