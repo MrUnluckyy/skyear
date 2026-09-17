@@ -10,6 +10,7 @@ import time
 import uuid
 import wave
 from pathlib import Path
+from urllib.parse import quote
 
 import numpy as np
 import yaml
@@ -46,6 +47,26 @@ class RingAudio:
     def slice(self, t0, t1):
         parts = [c for t, c in self.chunks if t + len(c) / self.sr >= t0 and t <= t1]
         return np.concatenate(parts) if parts else None
+
+
+def load_env_file(path: Path):
+    """Load KEY=VALUE lines from a .env file for local runs.
+
+    Docker Compose already does this via `env_file:`, so anything already in the
+    environment wins and this is a no-op in the container.
+    """
+    if not path.is_file():
+        return
+    for raw in path.read_text().splitlines():
+        line = raw.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, val = line.split("=", 1)
+        key, val = key.strip(), val.strip()
+        if len(val) >= 2 and val[0] == val[-1] and val[0] in "\"'":
+            val = val[1:-1]
+        if key:
+            os.environ.setdefault(key, val)
 
 
 def iso(t):
@@ -137,18 +158,36 @@ def cleanup_loop(out_dir, keep_days, stop):
         stop.wait(3600)
 
 
+def _scrub(text: str, secret: str) -> str:
+    """Strip a camera password out of ffprobe output before it reaches a log.
+
+    ffmpeg echoes the whole RTSP URL on failure, credentials included, and
+    build_url percent-encodes the password, so both forms are replaced.
+    """
+    if not secret:
+        return text
+    return text.replace(quote(secret, safe=""), "***").replace(secret, "***")
+
+
 def run_check(cfg, cams, a):
     import subprocess
     ok = True
     for c in cams:
         pw = os.environ.get(c.get("password_env", ""), "")
+        if c.get("password_env") and not pw:
+            print(f"[{c['id']}] FAIL {c['password_env']} is not set "
+                  f"(put it in .env, or export it before running)")
+            ok = False
+            continue
         url = build_url(c, pw)
         r = subprocess.run(["ffprobe", "-v", "error", "-rtsp_transport", "tcp", "-timeout", "10000000",
                             "-show_entries", "stream=codec_type,codec_name,sample_rate", "-of", "compact", url],
                            capture_output=True, text=True, timeout=30)
         audio = "codec_type=audio" in r.stdout
         ok &= audio
-        print(f"[{c['id']}] {'OK audio: ' + r.stdout.strip() if audio else 'FAIL ' + (r.stderr.strip() or r.stdout.strip() or 'no audio stream')}")
+        detail = (r.stdout.strip() if audio
+                  else _scrub(r.stderr.strip() or r.stdout.strip() or "no audio stream", pw))
+        print(f"[{c['id']}] {'OK audio: ' + detail if audio else 'FAIL ' + detail}")
     t = AdsbTracker(a.get("provider", "adsb.lol"), a.get("lat", cams[0]["lat"]), a.get("lon", cams[0]["lon"]),
                     a.get("radius_nm", 15), readsb_url=a.get("readsb_url"))
     try:
@@ -169,7 +208,10 @@ def main():
     ap.add_argument("--data", default=os.environ.get("SKYEAR_DATA", "/data"))
     ap.add_argument("--check", action="store_true", help="test camera audio and ADS-B, then exit")
     ap.add_argument("--replay", help="analyse a local audio file instead of cameras (no ADS-B matching)")
+    ap.add_argument("--env", default=os.environ.get("SKYEAR_ENV", ".env"),
+                    help="file to read camera passwords from (default: .env)")
     args = ap.parse_args()
+    load_env_file(Path(args.env))
 
     logging.basicConfig(level=os.environ.get("LOG_LEVEL", "INFO"),
                         format="%(asctime)s %(levelname)s %(name)s: %(message)s")

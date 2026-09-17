@@ -69,3 +69,6 @@ see `tests/test_detector.py::engine` for the signal used by the test suite.
 - In replay mode timestamps start at epoch 0, so `start_iso` and clip filenames
   read 1970. Harmless for tuning, but don't correlate replay output with real
   ADS-B data.
+- `.env` is loaded automatically for local runs (`--env` to point elsewhere).
+  Variables already in the environment win, so Docker Compose's `env_file`
+  behaviour is unchanged.

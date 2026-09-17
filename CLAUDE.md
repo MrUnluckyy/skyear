@@ -73,6 +73,7 @@ real detection range per aircraft type, and the labels for ML v0.2.
 ## Commands
 ```bash
 cd agent
+python -m skyear.main --config config.yaml --data ./out --check      # camera + ADS-B
 python -m skyear.main --config config.yaml --data ./out --replay rec.wav  # local, no ADS-B
 pytest                                                                     # unit tests
 docker compose run --rm skyear --check    # on the NAS: camera audio + ADS-B reachability
