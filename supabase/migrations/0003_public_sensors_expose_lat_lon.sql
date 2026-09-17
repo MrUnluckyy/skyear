@@ -1,0 +1,7 @@
+-- PostgREST serialises geography as WKB hex, which would make the browser parse
+-- binary just to drop a marker. public_sensors exposes coarsened lat/lon as
+-- plain numbers instead. The ~1 km grid snap still happens in the view, so
+-- exact positions never reach the client.
+--
+-- Superseded by 0005/0006, which add the liveness columns and fix the
+-- security_invoker setting. Kept for the record.

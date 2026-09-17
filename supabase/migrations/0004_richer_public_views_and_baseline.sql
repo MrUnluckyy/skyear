@@ -1,0 +1,20 @@
+-- Two changes the map needed.
+--
+-- 1. public_detections gained octave_db, snr_db, dominant_hz, floor_db,
+--    low_tilt_db, match_alt_m and match_delay_s. These describe a sound, not a
+--    place, so they are safe to publish for aircraft. Drone rows were tightened
+--    at the same time: bearing and acoustics are now nulled too, where
+--    previously bearing was public and would have let an observer work out what
+--    the network noticed and when.
+--
+-- 2. public_sensor_stats and public_type_stats added, reporting heard rate per
+--    sensor and per aircraft type.
+--
+--    public_sensor_stats.observed_seconds matters more than it looks. The noise
+--    baseline was first written as event seconds over a fixed 24 h, so a sensor
+--    listening for an hour reported a 1% duty cycle when the real figure was
+--    21%. That number decides whether a heard rate means anything, and the
+--    error ran in the worst possible direction - it made noise look like
+--    signal. It is now divided by the window actually observed.
+--
+-- Superseded by 0006 for the security_invoker fix. Kept for the record.
