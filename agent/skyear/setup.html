@@ -1,0 +1,296 @@
+<!doctype html>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Set up your SkyEar sensor</title>
+<style>
+  :root{--night:#0d141a;--deep:#080d12;--edge:#22303b;--haze:#17222b;
+        --sodium:#f0a94c;--frost:#c9e2f0;--signal:#57d1a8;--bone:#e6edf2;
+        --slate:#7d95a4;--dim:#55697a;--bad:#e8736b}
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--deep);color:var(--bone);
+       font:15px/1.55 ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif}
+  .wrap{max-width:620px;margin:0 auto;padding:40px 20px 80px}
+  h1{font-size:26px;line-height:1.15;margin:0 0 6px;letter-spacing:-.01em}
+  .sub{color:var(--slate);margin:0 0 28px}
+  fieldset{border:1px solid var(--edge);border-radius:4px;padding:20px;margin:0 0 18px}
+  legend{padding:0 8px;color:var(--sodium);font-size:13px}
+  label{display:block;font-size:13px;color:var(--slate);margin:14px 0 5px}
+  label:first-of-type{margin-top:0}
+  input,select{width:100%;padding:9px 11px;background:var(--deep);color:var(--bone);
+    border:1px solid var(--edge);border-radius:3px;font:14px ui-monospace,monospace}
+  input:focus,select:focus{outline:none;border-color:var(--sodium)}
+  .row{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+  button{padding:10px 16px;border-radius:3px;border:1px solid var(--edge);
+    background:var(--haze);color:var(--bone);font-size:14px;cursor:pointer}
+  button:hover:not(:disabled){border-color:var(--sodium)}
+  button.primary{background:var(--sodium);color:var(--deep);border-color:var(--sodium);font-weight:600}
+  button:disabled{opacity:.45;cursor:not-allowed}
+  .hint{font-size:12px;color:var(--dim);margin-top:6px}
+  .msg{margin-top:14px;padding:11px 13px;border-radius:3px;font-size:13.5px;border-left:3px solid}
+  .ok{border-color:var(--signal);background:rgba(87,209,168,.08);color:var(--signal)}
+  .err{border-color:var(--bad);background:rgba(232,115,107,.08);color:var(--bad)}
+  .meter{height:9px;background:var(--haze);border-radius:5px;overflow:hidden;margin-top:8px}
+  .meter i{display:block;height:100%;width:0;background:var(--sodium);transition:width .18s}
+  .lvl{display:flex;justify-content:space-between;font:12px ui-monospace,monospace;color:var(--dim);margin-top:6px}
+  .steps{display:flex;gap:8px;margin-bottom:24px;font-size:12px;color:var(--dim);flex-wrap:wrap}
+  .steps b{color:var(--sodium);font-weight:500}
+  code{font:12.5px ui-monospace,monospace;color:var(--frost)}
+  .foot{color:var(--dim);font-size:12px;margin-top:28px;border-top:1px solid var(--edge);padding-top:16px}
+  @media(max-width:520px){.row{grid-template-columns:1fr}}
+</style>
+
+<div class="wrap">
+  <h1>Set up your sensor</h1>
+  <p class="sub">Point this agent at a camera, say where it is, and connect it.
+    Your camera details stay on this machine.</p>
+
+  <div class="steps" id="steps"></div>
+
+  <fieldset>
+    <legend>1 · Your camera</legend>
+    <label for="type">Make</label>
+    <select id="type">
+      <option value="reolink">Reolink</option>
+      <option value="hikvision">Hikvision</option>
+      <option value="dahua">Dahua</option>
+      <option value="ubiquiti">Ubiquiti UniFi Protect</option>
+    </select>
+
+    <label for="host" id="hostLabel">Camera address on your network</label>
+    <input id="host" placeholder="192.168.1.50" autocomplete="off">
+    <div class="hint" id="hostHint">Find it in your router's device list, or the camera's app.</div>
+
+    <div id="creds">
+      <div class="row">
+        <div>
+          <label for="user">Username</label>
+          <input id="user" value="admin" autocomplete="off">
+        </div>
+        <div>
+          <label for="pass">Password</label>
+          <input id="pass" type="password" autocomplete="new-password">
+        </div>
+      </div>
+    </div>
+
+    <div id="tokenBox" style="display:none">
+      <label for="token">Stream token</label>
+      <input id="token" placeholder="aBcDeF123456" autocomplete="off">
+      <div class="hint">In UniFi Protect, enable RTSP on the camera and copy the part
+        of the URL after the last slash. There is no password.</div>
+    </div>
+
+    <p style="margin:18px 0 0"><button id="test">Test this camera</button></p>
+    <div id="testMsg"></div>
+  </fieldset>
+
+  <fieldset>
+    <legend>2 · Where it is</legend>
+    <p class="hint" style="margin:0 0 12px">Distances and sound-delay figures are measured
+      from this point, so a few hundred metres of error shows up in all of them.</p>
+    <p style="margin:0 0 12px"><button id="locate">Use my current location</button></p>
+    <div class="row">
+      <div><label for="lat">Latitude</label><input id="lat" placeholder="54.6872"></div>
+      <div><label for="lon">Longitude</label><input id="lon" placeholder="25.2797"></div>
+    </div>
+    <div class="row" style="margin-top:12px">
+      <div>
+        <label for="elev">Ground height above sea level</label>
+        <input id="elev" placeholder="filled in for you">
+        <div class="hint" id="elevHint">Looked up from the position.</div>
+      </div>
+      <div>
+        <label for="mount">How high it is mounted, in metres</label>
+        <input id="mount" value="4">
+        <div class="hint">Roughly. First floor is about 4.</div>
+      </div>
+    </div>
+  </fieldset>
+
+  <fieldset>
+    <legend>3 · Connect to SkyEar</legend>
+    <p class="hint" style="margin:0 0 12px">Sign in at
+      <code>skyear.vercel.app</code>, press Generate pairing code, and paste it here.</p>
+    <label for="code">Pairing code</label>
+    <input id="code" placeholder="K4M7PQR2" style="text-transform:uppercase">
+    <p style="margin:18px 0 0">
+      <button class="primary" id="save">Save and connect</button>
+    </p>
+    <div id="saveMsg"></div>
+  </fieldset>
+
+  <fieldset>
+    <legend>What it is hearing</legend>
+    <div class="meter"><i id="bar"></i></div>
+    <div class="lvl"><span id="lvlText">waiting for the agent…</span><span id="lvlState"></span></div>
+    <p class="hint">Appears once the agent is listening. If this never moves, the microphone
+      is not reaching the agent.</p>
+  </fieldset>
+
+  <p class="foot">Your camera address, username and password are stored only on this
+    machine, at file permissions only its owner can read. SkyEar receives detections and
+    a position rounded to about 110 metres — never the credentials, never video.</p>
+</div>
+
+<script>
+const $ = id => document.getElementById(id);
+const q = new URLSearchParams(location.search);
+// Build URLs properly: some endpoints already carry a query string, so
+// concatenating the token would produce a second "?".
+const api = (p, opts) => {
+  const url = new URL(p, location.origin);
+  if (q.get("t")) url.searchParams.set("t", q.get("t"));
+  return fetch(url, opts).then(r => r.json());
+};
+
+function msg(el, text, ok) {
+  el.innerHTML = `<div class="msg ${ok ? "ok" : "err"}">${text}</div>`;
+}
+
+function isUnifi() { return $("type").value === "ubiquiti"; }
+
+$("type").onchange = () => {
+  const u = isUnifi();
+  $("creds").style.display = u ? "none" : "";
+  $("tokenBox").style.display = u ? "" : "none";
+  $("hostLabel").textContent = u ? "Address of your UniFi NVR or UDM" : "Camera address on your network";
+  $("hostHint").textContent = u
+    ? "The NVR streams the camera, so this is the NVR's address — not the camera's."
+    : "Find it in your router's device list, or the camera's app.";
+};
+
+function cameraFromForm() {
+  const cam = { id: "home-1", type: $("type").value, host: $("host").value.trim() };
+  if (!isUnifi()) cam.username = $("user").value.trim() || "admin";
+  const lat = parseFloat($("lat").value), lon = parseFloat($("lon").value);
+  if (!isNaN(lat)) cam.lat = lat;
+  if (!isNaN(lon)) cam.lon = lon;
+  const e = parseFloat($("elev").value), m = parseFloat($("mount").value);
+  if (!isNaN(e)) cam.elevation_m = e;
+  if (!isNaN(m)) cam.mount_height_m = m;
+  return cam;
+}
+const secretFromForm = () => isUnifi() ? $("token").value.trim() : $("pass").value;
+
+$("test").onclick = async () => {
+  const btn = $("test");
+  btn.disabled = true; btn.textContent = "Testing…";
+  msg($("testMsg"), "Asking the camera what it streams. This can take a few seconds.", true);
+  try {
+    const r = await api("/api/test", {
+      method: "POST", headers: { "content-type": "application/json" },
+      body: JSON.stringify({ camera: cameraFromForm(), secret: secretFromForm() }),
+    });
+    if (r.ok) {
+      msg($("testMsg"),
+        `Audio found — ${r.codec} at ${r.sample_rate} Hz. This camera can be a sensor.`, true);
+    } else {
+      msg($("testMsg"), r.error || "Could not reach the camera.", false);
+    }
+  } catch { msg($("testMsg"), "The agent did not respond.", false); }
+  btn.disabled = false; btn.textContent = "Test this camera";
+};
+
+async function fillElevation() {
+  const lat = parseFloat($("lat").value), lon = parseFloat($("lon").value);
+  if (isNaN(lat) || isNaN(lon)) return;
+  $("elevHint").textContent = "Looking it up…";
+  try {
+    const r = await api(`/api/elevation?lat=${lat}&lon=${lon}`);
+    if (r.elevation_m != null) {
+      $("elev").value = Math.round(r.elevation_m);
+      $("elevHint").textContent = "Looked up from the position. Adjust if you know better.";
+    } else {
+      $("elevHint").textContent = "Could not look it up — please enter it if you know it.";
+    }
+  } catch { $("elevHint").textContent = "Could not look it up."; }
+}
+$("lat").onchange = fillElevation;
+$("lon").onchange = fillElevation;
+
+$("locate").onclick = () => {
+  if (!navigator.geolocation) return;
+  $("locate").textContent = "Locating…";
+  navigator.geolocation.getCurrentPosition(p => {
+    $("lat").value = p.coords.latitude.toFixed(5);
+    $("lon").value = p.coords.longitude.toFixed(5);
+    $("locate").textContent = "Use my current location";
+    fillElevation();
+  }, () => { $("locate").textContent = "Location unavailable — type it in"; });
+};
+
+$("save").onclick = async () => {
+  const btn = $("save");
+  const cam = cameraFromForm();
+  if (!cam.host) return msg($("saveMsg"), "Enter the camera address first.", false);
+  if (cam.lat == null || cam.lon == null) return msg($("saveMsg"), "Set the position first.", false);
+  btn.disabled = true; btn.textContent = "Saving…";
+  try {
+    const s = await api("/api/save", {
+      method: "POST", headers: { "content-type": "application/json" },
+      body: JSON.stringify({ camera: cam, secret: secretFromForm() }),
+    });
+    if (s.error) throw new Error(s.error);
+
+    const code = $("code").value.trim().toUpperCase();
+    if (code) {
+      const p = await api("/api/pair", {
+        method: "POST", headers: { "content-type": "application/json" },
+        body: JSON.stringify({ code }),
+      });
+      if (p.error) {
+        msg($("saveMsg"), `Camera saved, but pairing failed: ${p.error}`, false);
+      } else {
+        msg($("saveMsg"),
+          "Connected. Restart the agent and your sensor appears on the map within a minute.", true);
+      }
+    } else {
+      msg($("saveMsg"), "Camera saved. Add a pairing code to connect it to SkyEar.", true);
+    }
+    load();
+  } catch (e) { msg($("saveMsg"), e.message || "Could not save.", false); }
+  btn.disabled = false; btn.textContent = "Save and connect";
+};
+
+async function load() {
+  try {
+    const s = await api("/api/state");
+    if (s.error) return;
+    $("steps").innerHTML = [
+      s.configured ? "<b>camera set</b>" : "camera",
+      s.paired ? "<b>connected</b>" : "connect",
+      `agent v${s.version}`,
+    ].join(" · ");
+    const cam = (s.cameras || [])[0];
+    if (cam) {
+      $("type").value = cam.type || "reolink"; $("type").onchange();
+      $("host").value = cam.host || "";
+      if (cam.username) $("user").value = cam.username;
+      if (cam.lat != null) $("lat").value = cam.lat;
+      if (cam.lon != null) $("lon").value = cam.lon;
+      if (cam.elevation_m != null) $("elev").value = cam.elevation_m;
+      if (cam.mount_height_m != null) $("mount").value = cam.mount_height_m;
+    }
+  } catch {}
+}
+
+async function level() {
+  try {
+    const s = await api("/api/level");
+    const v = Object.values(s.live || {})[0];
+    if (!v || v.excess_db == null) return;
+    // Excess over this sensor's own noise floor, capped for display.
+    const pct = Math.max(2, Math.min(100, (v.excess_db / 25) * 100));
+    $("bar").style.width = pct + "%";
+    $("bar").style.background = v.event_active ? "var(--signal)" : "var(--sodium)";
+    $("lvlText").textContent = `${v.excess_db.toFixed(1)} dB over the noise floor`;
+    $("lvlState").textContent = !v.warm ? "settling"
+      : v.event_active ? `hearing something · ${Math.round(v.event_s)}s`
+      : v.rising ? "something starting" : "listening";
+  } catch {}
+}
+
+load();
+setInterval(level, 1000);
+level();
+</script>

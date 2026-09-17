@@ -21,6 +21,8 @@ from .adsb import AdsbTracker
 from .audio import AudioSource, build_url
 from .detector import BandEnergyDetector
 from .matcher import PassTracker, match_event
+from . import config_store
+from .setup_server import serve as serve_setup
 from .uploader import CloudError, Uploader, pair
 
 log = logging.getLogger("skyear")
@@ -283,6 +285,9 @@ def main():
     ap.add_argument("--replay", help="analyse a local audio file instead of cameras (no ADS-B matching)")
     ap.add_argument("--env", default=os.environ.get("SKYEAR_ENV", ".env"),
                     help="file to read camera passwords from (default: .env)")
+    ap.add_argument("--setup-port", type=int, default=int(os.environ.get("SKYEAR_SETUP_PORT", 8088)),
+                    help="port for the local setup page (default: 8088)")
+    ap.add_argument("--no-setup", action="store_true", help="do not serve the setup page")
     ap.add_argument("--pair", metavar="CODE",
                     help="pair this agent with an account using a code from the web app")
     args = ap.parse_args()
@@ -290,8 +295,18 @@ def main():
 
     logging.basicConfig(level=os.environ.get("LOG_LEVEL", "INFO"),
                         format="%(asctime)s %(levelname)s %(name)s: %(message)s")
-    cfg = yaml.safe_load(open(args.config))
     out_dir = Path(args.data)
+    # config.yaml is now optional. It still wins where present, so existing
+    # installs are untouched, but a fresh agent can be configured entirely from
+    # the setup page instead of a text editor.
+    cfg = {}
+    if Path(args.config).is_file():
+        cfg = yaml.safe_load(open(args.config)) or {}
+    stored = config_store.load(out_dir)
+    cfg = config_store.to_agent_config(stored, cfg)
+    # Camera secrets written by the setup page behave exactly like .env entries.
+    for name, value in config_store.secrets_from(stored).items():
+        os.environ.setdefault(name, value)
     events_w = JsonlWriter(out_dir / "events.jsonl")
     passes_w = JsonlWriter(out_dir / "passes.jsonl")
     stop = threading.Event()
@@ -304,11 +319,24 @@ def main():
         return
 
     a = cfg.get("adsb", {})
-    cams = cfg["cameras"]
+    cams = cfg.get("cameras") or []
     if args.pair:
         return run_pair(cfg, cams, out_dir, args.pair)
     if args.check:
         return run_check(cfg, cams, a)
+    if not args.no_setup:
+        try:
+            serve_setup(out_dir, LIVE, port=args.setup_port)
+        except OSError as e:
+            log.warning("setup page unavailable on port %d: %s", args.setup_port, e)
+
+    if not cams:
+        log.warning("no camera configured yet - open http://<this-machine>:%d to set one up",
+                    args.setup_port)
+        while not stop.is_set():
+            stop.wait(1)
+        return 0
+
     adsb = AdsbTracker(a.get("provider", "adsb.lol"), a.get("lat", cams[0]["lat"]), a.get("lon", cams[0]["lon"]),
                        a.get("radius_nm", 15), a.get("poll_seconds", 5), a.get("readsb_url"),
                        max_backoff_s=a.get("max_backoff_s", 300))

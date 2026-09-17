@@ -96,3 +96,26 @@ dropped connection replays rather than loses - and ingest is idempotent by
 database constraint, so re-sending cannot duplicate rows.
 
 To un-pair, delete `out/device.json` and revoke the device in the web app.
+
+## Setting up without a terminal
+
+The agent serves a setup page at `http://<this-machine>:8088`. It replaces the
+parts of installation that needed a text editor: the camera form tests the
+stream before you commit to it, the position is picked from the browser with
+ground elevation looked up automatically, and pairing happens with a button
+rather than a CLI flag.
+
+A fresh install needs no files at all. `config.yaml` still wins where it
+exists, so nothing changes for existing setups.
+
+Two things worth knowing about the page:
+
+- It is **open on the local network while unconfigured**, the way a new router
+  is. There is nothing to protect yet, and demanding a token read from a log
+  file would defeat the point. Once a camera password is stored it requires the
+  token in `data/setup_token`, which the page shows you when you save.
+- The camera secret is stored in `data/config.json` at mode 0600 and is never
+  sent back to the browser. That protects it from other users on the box and
+  from careless backups; it is not protection against someone who already has
+  root, and encrypting it with a key sitting on the same disk would be theatre.
+  The property that matters is unchanged: it never leaves the device.

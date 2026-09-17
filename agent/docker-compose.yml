@@ -6,9 +6,19 @@ services:
     # build: .
     container_name: skyear-agent
     restart: unless-stopped
-    env_file: .env
+    # No env_file by default: the setup page stores the camera secret in ./data,
+    # so a fresh install needs no files at all. Compose fails outright on a
+    # missing env_file, and the `required: false` form is too new for some NAS
+    # builds - so people configuring by hand add this line back themselves:
+    #   env_file: .env
     environment:
       TZ: Europe/Vilnius
+    ports:
+      # The setup page. Open http://<this-machine>:8088 to configure a camera
+      # without editing files.
+      - "8088:8088"
     volumes:
-      - ./config.yaml:/config/config.yaml:ro
+      # config.yaml is optional now - the setup page writes to ./data instead.
+      # Uncomment to hand-edit configuration the old way.
+      # - ./config.yaml:/config/config.yaml:ro
       - ./data:/data
