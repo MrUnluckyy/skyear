@@ -117,3 +117,44 @@ python -m skyear.main --config config.yaml --data ./out --replay rec.wav
 - Source of the 100 Hz hum
 - Whether droneradar would accept data from fixed sensors
 - Project name (working name "SkyEar") and language of the UI (LT/EN)
+
+---
+
+## Session log
+
+### 2026-09-17 — first live run, agent under version control
+Appended by Claude Code. Original text above is unchanged.
+
+**Repo:** the v0.1 code was never in this repo — it was loose in
+`~/Downloads/skyear-agent.zip`. Now under git in a monorepo layout
+(`agent/`, `web/`, `supabase/`, `docs/`) with `CLAUDE.md` recording the
+privacy invariants and 74 unit tests.
+
+**Three faults the live run found**, none of which crashed anything — all would
+have silently corrupted the dataset:
+
+| Fault | Effect if left running |
+|---|---|
+| Parked transponders at VNO report a frozen fix timestamp, so `PassTracker` closed the pass on staleness and reopened it on the same tick | An identical pass record every 5 s; airport ground vehicles would have outnumbered real aircraft and made the heard/not-heard ratio meaningless |
+| `match_event` had no ground/staleness filter | The first real event was labelled `ADSTEST` — a ground beacon. Apron transponders sit at a constant 3–4 km and win the nearest-slant sort, so they would have stolen the label from every detection, and those labels are what ML v0.2 trains on |
+| Wind gusts scored 38–40 dB SNR and would have overlapped aircraft arrival windows | Gusts would mark aircraft as **heard**, inflating the detection rate with noise — failing in the direction that says the project works |
+
+**Wind signature (new measurement).** Two gusts, 11:27 and 11:31:
+dominant 56–57 Hz pinned at the band edge, energy falling ~39 dB from 50–100 Hz
+to above 400 Hz. Now measured as `low_tilt_db` (50–100 minus 200–400) and tagged
+`likely_wind` above 20 dB. Synthetic engine sits at −43 dB, wind at +27 dB.
+**The aircraft side of that threshold is unvalidated** — it needs one confirmed
+real detection.
+
+**Acoustic result so far: no aircraft detected.** `BTI34K` at 2.5 km / 343 m and
+`BTI98T` at 3.7 km / 221 m both `not heard`. Too few samples to conclude, and
+the ambient floor was unsettled (−9 to −24 dB across restarts), but this is the
+decisive open question and it now has real numbers attached.
+
+**ADS-B:** `adsb.lol` returns 429 even at a 10 s poll interval. Exponential
+backoff and `Retry-After` are implemented, so it degrades gracefully, but track
+history gets gappy. Worth testing `airplanes.live`, or moving up the local
+`readsb` + RTL-SDR plan sooner than phase 2.
+
+**Closed from the TODO list:** unit tests; ADS-B rate-limit backoff.
+**New:** replay mode timestamps start at epoch 0, so `start_iso` reads 1970.
