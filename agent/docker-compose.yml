@@ -1,0 +1,12 @@
+services:
+  skyear:
+    build: .
+    image: skyear-agent:0.1
+    container_name: skyear-agent
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      TZ: Europe/Vilnius
+    volumes:
+      - ./config.yaml:/config/config.yaml:ro
+      - ./data:/data

@@ -1,0 +1,85 @@
+"""Links sound events to aircraft, accounting for sound travel time, and
+records every nearby aircraft pass (heard or not) for range statistics."""
+import threading
+import time
+
+from .geo import SPEED_OF_SOUND, slant
+
+
+def emission_geometry(adsb, hx, sensor, t_arrival, c=SPEED_OF_SOUND):
+    """Where was the aircraft when it emitted the sound arriving at t_arrival?"""
+    te = t_arrival
+    geo = None
+    for _ in range(6):
+        p = adsb.position_at(hx, te)
+        if p is None:
+            return None
+        geo = slant(sensor, *p)
+        te = t_arrival - geo[0] / c
+    s, h, elev, brg = geo
+    lat, lon, alt = adsb.position_at(hx, te)
+    return {"slant_m": round(s), "horizontal_m": round(h), "elevation_deg": round(elev, 1),
+            "bearing_deg": round(brg), "alt_m": round(alt), "lat": round(lat, 5), "lon": round(lon, 5),
+            "delay_s": round(s / c, 1)}
+
+
+def match_event(adsb, sensor, event, max_range_m):
+    cands = []
+    for hx, (meta, _) in adsb.snapshot().items():
+        g = emission_geometry(adsb, hx, sensor, event["peak_time"])
+        if g and g["slant_m"] <= max_range_m:
+            cands.append({"hex": hx, **meta, **g})
+    cands.sort(key=lambda c: c["slant_m"])
+    return cands[:5]
+
+
+class PassTracker:
+    """Tracks closest approach of each aircraft to a sensor; emits a pass record
+    once it has moved away, noting whether any sound event lined up with it."""
+
+    def __init__(self, adsb, sensor, radius_m, on_pass):
+        self.adsb, self.sensor, self.radius_m, self.on_pass = adsb, sensor, radius_m, on_pass
+        self.open = {}    # hex -> pass dict
+        self.events = []  # recent (start, end, event_id, matched_hex)
+        self.lock = threading.Lock()
+
+    def add_event(self, event, matched_hex):
+        with self.lock:
+            self.events.append((event["start"], event["end"], event["id"], matched_hex))
+            cutoff = time.time() - 3600
+            self.events = [e for e in self.events if e[1] > cutoff]
+
+    def tick(self, now=None):
+        now = now or time.time()
+        snap = self.adsb.snapshot()
+        for hx, (meta, (t, lat, lon, alt)) in snap.items():
+            s, h, elev, _ = slant(self.sensor, lat, lon, alt)
+            p = self.open.get(hx)
+            if s <= self.radius_m:
+                if p is None:
+                    p = self.open[hx] = {"hex": hx, **meta, "first_t": t, "min_slant_m": s, "t_min": t,
+                                         "alt_m_at_min": alt, "elev_deg_at_min": elev}
+                if s < p["min_slant_m"]:
+                    p.update(min_slant_m=s, t_min=t, alt_m_at_min=alt, elev_deg_at_min=elev, **meta)
+                p["last_t"] = t
+        for hx in list(self.open):
+            p = self.open[hx]
+            gone = hx not in snap or now - p["last_t"] > 90
+            if not gone:
+                _, (t, lat, lon, alt) = snap[hx]
+                gone = slant(self.sensor, lat, lon, alt)[0] > self.radius_m and now - p["last_t"] > 30
+            if gone:
+                self._close(self.open.pop(hx))
+
+    def _close(self, p):
+        arrival = p["t_min"] + p["min_slant_m"] / SPEED_OF_SOUND
+        with self.lock:
+            hits = [e for e in self.events
+                    if e[3] == p["hex"] or (e[3] is None and e[0] - 20 <= arrival <= e[1] + 20)]
+        self.on_pass({
+            "hex": p["hex"], "flight": p.get("flight"), "type": p.get("type"), "reg": p.get("reg"),
+            "closest_time": round(p["t_min"], 1), "min_slant_m": round(p["min_slant_m"]),
+            "alt_m": round(p["alt_m_at_min"]), "elevation_deg": round(p["elev_deg_at_min"], 1),
+            "heard": bool(hits), "event_ids": [e[2] for e in hits],
+            "on_ground": p.get("on_ground", False),
+        })

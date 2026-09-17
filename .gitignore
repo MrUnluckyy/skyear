@@ -1,0 +1,40 @@
+# ---- Secrets: camera passwords, device tokens, Supabase keys ----
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+secrets/
+
+# ---- Live config (contains camera IPs, exact sensor coordinates) ----
+config.yaml
+agent/config.yaml
+**/config.local.*
+
+# ---- Captured data: audio of private property, never commit ----
+data/
+out/
+*.wav
+*.jsonl
+clips/
+
+# ---- Python ----
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+.ruff_cache/
+*.egg-info/
+
+# ---- Node / web ----
+node_modules/
+dist/
+.next/
+.vercel/
+build/
+
+# ---- Editors / OS ----
+.DS_Store
+.idea/
+*.swp

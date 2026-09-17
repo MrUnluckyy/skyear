@@ -1,0 +1,42 @@
+# SkyEar agent config. Copy to config.yaml and edit.
+
+adsb:
+  provider: adsb.lol        # adsb.lol | airplanes.live | readsb
+  # readsb_url: http://raspberrypi.local/tar1090/data/aircraft.json
+  poll_seconds: 5
+  radius_nm: 15             # ~28 km around the first camera
+  # lat/lon default to the first camera
+
+cameras:
+  - id: home-1
+    type: reolink           # reolink | hikvision | dahua | generic (then set path:)
+    host: 192.168.1.88
+    port: 554
+    channel: 1
+    stream: sub             # sub is enough: same audio, less bandwidth
+    username: admin
+    password_env: CAM1_PASSWORD
+    lat: 54.6872            # exact camera position (stays on this device)
+    lon: 25.2797
+    elevation_m: 120        # ground elevation above sea level
+    mount_height_m: 4
+
+detector:
+  band_hz: [50, 2000]
+  threshold_db: 8           # dB above rolling noise floor to trigger
+  release_db: 4
+  min_duration_s: 4         # aircraft are long; ignores doors, dogs, claps
+  release_s: 3
+  max_event_s: 240
+  floor_window_s: 180
+  floor_percentile: 20
+  warmup_s: 30
+
+matching:
+  max_range_m: 12000        # aircraft further than this are not linked to a sound
+  pass_radius_m: 8000       # every aircraft closer than this gets a heard/not-heard record
+
+clips:
+  save: true                # clips stay on this device
+  pre_roll_s: 5
+  keep_days: 14
