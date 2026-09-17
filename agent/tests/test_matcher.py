@@ -53,29 +53,31 @@ def test_match_event_filters_by_max_range_and_sorts_by_slant():
     adsb = FakeAdsb(t_closest=1000.0, offset_north_m=1500.0)
     event = {"peak_time": 1000.0}
 
-    near = match_event(adsb, SENSOR, event, max_range_m=12000)
+    near = match_event(adsb, SENSOR, event, max_range_m=12000, now=1000.0)
     assert len(near) == 1
     assert near[0]["hex"] == adsb.hex
     assert near[0]["flight"] == "BTI4TK"      # metadata is merged into the candidate
     assert near[0]["type"] == "BCS3"
     assert near[0]["slant_m"] <= 12000
 
-    far = match_event(adsb, SENSOR, event, max_range_m=500)
+    far = match_event(adsb, SENSOR, event, max_range_m=500, now=1000.0)
     assert far == []                           # out of range, no match
 
 
 def test_match_event_sorts_multiple_candidates_nearest_first():
+    now = time.time()
+
     class TwoPlanes:
         def position_at(self, hx, t, max_gap_s=30.0):
-            lat = SENSOR["lat"]
-            lon = SENSOR["lon"]
+            lat, lon = SENSOR["lat"], SENSOR["lon"]
             return (lat, lon, 1124.0) if hx == "near00" else (lat, lon, 6124.0)
 
         def snapshot(self):
-            return {"far000": ({"flight": "FAR"}, (0, 0, 0, 0)),
-                    "near00": ({"flight": "NEAR"}, (0, 0, 0, 0))}
+            return {hx: ({"flight": hx.upper(), "on_ground": False},
+                         (now, *self.position_at(hx, now)))
+                    for hx in ("far000", "near00")}
 
-    got = match_event(TwoPlanes(), SENSOR, {"peak_time": 0.0}, max_range_m=12000)
+    got = match_event(TwoPlanes(), SENSOR, {"peak_time": now}, max_range_m=12000, now=now)
     assert [c["hex"] for c in got] == ["near00", "far000"]
     assert got[0]["slant_m"] < got[1]["slant_m"]
 

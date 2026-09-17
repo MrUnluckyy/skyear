@@ -117,7 +117,10 @@ def camera_worker(cam, cfg, adsb, out_dir, events_w, passes_w, stop, live=True):
             ev["id"] = uuid.uuid4().hex[:12]
             ev["camera"] = cid
             ev["start_iso"] = iso(ev["start"])
-            cands = match_event(adsb, sensor, ev, max_range) if (adsb and live) else []
+            cands = (match_event(adsb, sensor, ev, max_range,
+                                 max_fix_age_s=match_cfg.get("max_fix_age_s", 60),
+                                 track_ground=match_cfg.get("track_ground", False))
+                     if (adsb and live) else [])
             ev["aircraft"] = cands
             best = cands[0] if cands else None
             if clips_cfg.get("save", True):

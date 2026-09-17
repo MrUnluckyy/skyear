@@ -23,9 +23,22 @@ def emission_geometry(adsb, hx, sensor, t_arrival, c=SPEED_OF_SOUND):
             "delay_s": round(s / c, 1)}
 
 
-def match_event(adsb, sensor, event, max_range_m):
+def match_event(adsb, sensor, event, max_range_m, max_fix_age_s=60.0,
+                track_ground=False, now=None):
+    """Rank aircraft that could have emitted this sound, nearest first.
+
+    Ground clutter is excluded by default. An airport apron holds many parked
+    transponders at a constant few km from the sensor, and because candidates
+    are ranked by slant range they would otherwise outrank genuine aircraft
+    further out and steal the label from every real detection.
+    """
+    now = now if now is not None else time.time()
     cands = []
-    for hx, (meta, _) in adsb.snapshot().items():
+    for hx, (meta, (t_fix, _, _, alt)) in adsb.snapshot().items():
+        if now - t_fix > max_fix_age_s:
+            continue
+        if not track_ground and (meta.get("on_ground") or alt <= 0):
+            continue
         g = emission_geometry(adsb, hx, sensor, event["peak_time"])
         if g and g["slant_m"] <= max_range_m:
             cands.append({"hex": hx, **meta, **g})
