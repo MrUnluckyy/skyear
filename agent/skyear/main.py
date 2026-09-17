@@ -92,7 +92,10 @@ def camera_worker(cam, cfg, adsb, out_dir, events_w, passes_w, stop, live=True):
     pt = None
     if adsb and live:
         pt = PassTracker(adsb, sensor, match_cfg.get("pass_radius_m", 8000),
-                         on_pass=lambda p: _on_pass(cid, p, passes_w))
+                         on_pass=lambda p: _on_pass(cid, p, passes_w),
+                         max_fix_age_s=match_cfg.get("max_fix_age_s", 60),
+                         track_ground=match_cfg.get("track_ground", False),
+                         reopen_cooldown_s=match_cfg.get("reopen_cooldown_s", 120))
 
         def pass_loop():
             while not stop.is_set():
@@ -233,7 +236,8 @@ def main():
     if args.check:
         return run_check(cfg, cams, a)
     adsb = AdsbTracker(a.get("provider", "adsb.lol"), a.get("lat", cams[0]["lat"]), a.get("lon", cams[0]["lon"]),
-                       a.get("radius_nm", 15), a.get("poll_seconds", 5), a.get("readsb_url"))
+                       a.get("radius_nm", 15), a.get("poll_seconds", 5), a.get("readsb_url"),
+                       max_backoff_s=a.get("max_backoff_s", 300))
     threading.Thread(target=adsb.run, args=(stop,), daemon=True, name="adsb").start()
     threading.Thread(target=cleanup_loop, args=(out_dir, cfg.get("clips", {}).get("keep_days", 14), stop),
                      daemon=True, name="cleanup").start()

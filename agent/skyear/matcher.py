@@ -37,10 +37,15 @@ class PassTracker:
     """Tracks closest approach of each aircraft to a sensor; emits a pass record
     once it has moved away, noting whether any sound event lined up with it."""
 
-    def __init__(self, adsb, sensor, radius_m, on_pass):
+    def __init__(self, adsb, sensor, radius_m, on_pass, max_fix_age_s=60.0,
+                 track_ground=False, reopen_cooldown_s=120.0):
         self.adsb, self.sensor, self.radius_m, self.on_pass = adsb, sensor, radius_m, on_pass
-        self.open = {}    # hex -> pass dict
-        self.events = []  # recent (start, end, event_id, matched_hex)
+        self.max_fix_age_s = max_fix_age_s
+        self.track_ground = track_ground
+        self.reopen_cooldown_s = reopen_cooldown_s
+        self.open = {}       # hex -> pass dict
+        self.closed_at = {}  # hex -> when its last pass was emitted
+        self.events = []     # recent (start, end, event_id, matched_hex)
         self.lock = threading.Lock()
 
     def add_event(self, event, matched_hex):
@@ -53,10 +58,20 @@ class PassTracker:
         now = now or time.time()
         snap = self.adsb.snapshot()
         for hx, (meta, (t, lat, lon, alt)) in snap.items():
+            # A parked transponder keeps reporting the same frozen fix. Without
+            # this guard its pass closes on staleness and immediately reopens,
+            # emitting a duplicate record on every tick.
+            if now - t > self.max_fix_age_s:
+                continue
+            # Surface traffic is not an aircraft pass and would skew range stats.
+            if not self.track_ground and (meta.get("on_ground") or alt <= 0):
+                continue
             s, h, elev, _ = slant(self.sensor, lat, lon, alt)
             p = self.open.get(hx)
             if s <= self.radius_m:
                 if p is None:
+                    if now - self.closed_at.get(hx, float("-inf")) < self.reopen_cooldown_s:
+                        continue  # just emitted a pass for this aircraft
                     p = self.open[hx] = {"hex": hx, **meta, "first_t": t, "min_slant_m": s, "t_min": t,
                                          "alt_m_at_min": alt, "elev_deg_at_min": elev}
                 if s < p["min_slant_m"]:
@@ -69,7 +84,11 @@ class PassTracker:
                 _, (t, lat, lon, alt) = snap[hx]
                 gone = slant(self.sensor, lat, lon, alt)[0] > self.radius_m and now - p["last_t"] > 30
             if gone:
+                self.closed_at[hx] = now
                 self._close(self.open.pop(hx))
+        # keep the cooldown map from growing without bound
+        for hx in [h for h, t in self.closed_at.items() if now - t > self.reopen_cooldown_s * 10]:
+            self.closed_at.pop(hx, None)
 
     def _close(self, p):
         arrival = p["t_min"] + p["min_slant_m"] / SPEED_OF_SOUND

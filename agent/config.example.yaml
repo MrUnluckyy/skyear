@@ -3,7 +3,8 @@
 adsb:
   provider: adsb.lol        # adsb.lol | airplanes.live | readsb
   # readsb_url: http://raspberrypi.local/tar1090/data/aircraft.json
-  poll_seconds: 5
+  poll_seconds: 10          # adsb.lol returns 429 at 5 s; 10 s stays under the limit
+  max_backoff_s: 300        # cap for exponential backoff after failed polls
   radius_nm: 15             # ~28 km around the first camera
   # lat/lon default to the first camera
 
@@ -35,6 +36,9 @@ detector:
 matching:
   max_range_m: 12000        # aircraft further than this are not linked to a sound
   pass_radius_m: 8000       # every aircraft closer than this gets a heard/not-heard record
+  max_fix_age_s: 60         # ignore ADS-B fixes older than this (parked transponders)
+  track_ground: false       # surface traffic is not an aircraft pass
+  reopen_cooldown_s: 120    # stops one pass splitting into duplicates across an ADS-B gap
 
 clips:
   save: true                # clips stay on this device

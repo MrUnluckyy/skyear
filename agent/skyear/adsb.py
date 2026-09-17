@@ -1,4 +1,5 @@
 """Polls live ADS-B positions and keeps a short per-aircraft track history."""
+from __future__ import annotations
 import collections
 import json
 import logging
@@ -17,9 +18,11 @@ PROVIDERS = {
 
 
 class AdsbTracker:
-    def __init__(self, provider, lat, lon, radius_nm=15, poll_s=5.0, readsb_url=None, history_s=900):
+    def __init__(self, provider, lat, lon, radius_nm=15, poll_s=5.0, readsb_url=None,
+                 history_s=900, max_backoff_s=300.0):
         self.provider, self.lat, self.lon = provider, lat, lon
         self.radius_nm, self.poll_s = radius_nm, max(poll_s, 2.0)
+        self.max_backoff_s = max_backoff_s
         self.readsb_url = readsb_url
         self.history_s = history_s
         self.tracks = {}   # hex -> deque[(t, lat, lon, alt_m)]
@@ -97,13 +100,52 @@ class AdsbTracker:
         with self.lock:
             return {h: (dict(self.meta.get(h, {})), tr[-1]) for h, tr in self.tracks.items() if tr}
 
+    def next_delay(self, fails: int, retry_after: float | None = None) -> float:
+        """Seconds to wait before the next poll.
+
+        Backs off exponentially while the provider is unhappy, because these are
+        free community APIs and retrying a 429 at the normal rate is what earns
+        an IP ban. A Retry-After header always wins.
+        """
+        if fails <= 0:
+            return self.poll_s
+        if retry_after is not None:
+            return max(self.poll_s, min(retry_after, self.max_backoff_s))
+        return min(self.poll_s * (2 ** fails), self.max_backoff_s)
+
+    @staticmethod
+    def retry_after_seconds(exc) -> float | None:
+        """Read Retry-After off an HTTPError, if the provider sent one."""
+        headers = getattr(exc, "headers", None)
+        if not headers:
+            return None
+        raw = headers.get("Retry-After")
+        if raw is None:
+            return None
+        try:
+            return float(str(raw).strip())
+        except ValueError:
+            return None  # HTTP-date form; fall back to exponential backoff
+
     def run(self, stop: threading.Event):
         err_logged = 0.0
+        fails = 0
+        suppressed = 0
         while not stop.is_set():
             try:
                 self.poll_once()
+                if fails:
+                    log.info("ADS-B recovered after %d failed poll(s)", fails)
+                fails, suppressed = 0, 0
+                delay = self.poll_s
             except Exception as e:  # network hiccups must not kill the agent
+                fails += 1
+                delay = self.next_delay(fails, self.retry_after_seconds(e))
                 if time.time() - err_logged > 60:
-                    log.warning("ADS-B poll failed: %s", e)
-                    err_logged = time.time()
-            stop.wait(self.poll_s)
+                    extra = f" ({suppressed} more suppressed)" if suppressed else ""
+                    log.warning("ADS-B poll failed %dx%s, next try in %.0fs: %s",
+                                fails, extra, delay, e)
+                    err_logged, suppressed = time.time(), 0
+                else:
+                    suppressed += 1
+            stop.wait(delay)
