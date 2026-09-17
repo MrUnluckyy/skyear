@@ -204,33 +204,38 @@ export default function SkyMap() {
     };
   }, []);
 
+  /**
+   * Poll the public views rather than subscribing to postgres_changes.
+   *
+   * Realtime on `detections` cannot work for visitors: the table is not in the
+   * supabase_realtime publication, and adding it would not help, because
+   * Realtime honours RLS and anon has no select policy on that table - by
+   * design, since it holds noise rows and undelayed drone matches. Subscribing
+   * to the base table would mean either a dead channel or relaxing the privacy
+   * boundary. The agent uploads every 30 s, so polling matches the real update
+   * rate anyway.
+   */
   useEffect(() => {
     const supabase = createClient();
     let alive = true;
 
-    (async () => {
+    const load = async () => {
       const [s, d] = await Promise.all([
         supabase.from("public_sensors").select("*"),
         supabase.from("public_detections").select("*").order("started_at", { ascending: false }).limit(50),
       ]);
       if (!alive) return;
       if (s.error) setError(s.error.message);
+      else setError(null);
       setSensors((s.data as PublicSensor[]) ?? []);
       setDetections((d.data as PublicDetection[]) ?? []);
-    })();
+    };
 
-    const channel = supabase
-      .channel("detections")
-      .on("postgres_changes", { event: "INSERT", schema: "public", table: "detections" }, (payload) => {
-        const row = payload.new as PublicDetection;
-        if (row.class === "noise") return;
-        setDetections((prev) => [row, ...prev].slice(0, 50));
-      })
-      .subscribe();
-
+    load();
+    const id = setInterval(load, 30_000);
     return () => {
       alive = false;
-      supabase.removeChannel(channel);
+      clearInterval(id);
     };
   }, []);
 
