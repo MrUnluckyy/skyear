@@ -11,12 +11,34 @@ import numpy as np
 
 OCTAVES = [(50, 100), (100, 200), (200, 400), (400, 800), (800, 1600), (1600, 3200)]
 
+# Periodicity, measured by cepstral peak prominence.
+#
+# Calibrated against real recordings and synthetic sources:
+#
+#   piston engine, 12 harmonics   0.228   <- the Shahed signature
+#   piston at  0 dB SNR in wind   0.148   <- still clear when as loud as the gale
+#   piston at -6 dB SNR in wind   0.126   <- still clear when quieter than it
+#   our own field recordings      0.060-0.101
+#   wind                          0.053
+#   white noise                   0.051
+#   synthetic turbofan (3 tones)  0.063
+#
+# The last line is the important caveat: this separates DENSE harmonic stacks
+# from noise, so it is strong for piston drones and weak for jets, whose energy
+# is mostly broadband roar. It found no separation at all between our
+# aircraft-matched and unmatched events - consistent with those recordings
+# containing no engine at any useful level.
+#
+# The default sits above every observed noise value and below a piston buried
+# 6 dB under wind.
+F0_MIN_HZ, F0_MAX_HZ = 55.0, 400.0
+
 
 class BandEnergyDetector:
     def __init__(self, sr=16000, frame_s=0.5, band_hz=(50, 2000), threshold_db=8.0,
                  release_db=4.0, min_duration_s=4.0, release_s=3.0, max_event_s=240.0,
                  floor_window_s=180.0, floor_percentile=20.0, warmup_s=30.0,
-                 wind_tilt_db=20.0):
+                 wind_tilt_db=20.0, harmonic_cpp_db=0.12):
         self.sr = sr
         self.n = int(sr * frame_s)
         self.frame_s = self.n / sr
@@ -33,6 +55,10 @@ class BandEnergyDetector:
         self.pct = floor_percentile
         self.warmup_frames = int(warmup_s / self.frame_s)
         self.wind_tilt_db = wind_tilt_db
+        self.harmonic_cpp_db = harmonic_cpp_db
+        # Quefrency bounds for a plausible engine fundamental.
+        self.q_lo = max(2, int(sr / F0_MAX_HZ))
+        self.q_hi = min(self.n // 2, int(sr / F0_MIN_HZ))
         self.seen = 0
         self.pending = np.zeros(0, dtype=np.float32)
         self.pending_t = None
@@ -41,6 +67,29 @@ class BandEnergyDetector:
         self.below = 0
         self.floor = None
         self.last_db = None
+        self.last_cpp = None
+
+    def _cpp(self, spec):
+        """Cepstral peak prominence, and the fundamental it implies.
+
+        The cepstrum is the spectrum of the log-spectrum, so a regularly spaced
+        harmonic stack collapses into a single peak at the quefrency of its
+        fundamental period. Noise produces no such peak. The value returned is
+        the peak height above a straight-line fit through the surrounding
+        cepstrum, which makes it independent of loudness - a quiet engine still
+        reads as periodic, and a roaring gale still does not.
+        """
+        cep = np.fft.irfft(np.log(spec))
+        lo, hi = self.q_lo, self.q_hi
+        window = cep[lo:hi]
+        if window.size < 4:
+            return 0.0, 0.0
+        idx = np.arange(window.size)
+        # The cepstrum slopes, so the peak matters relative to that slope.
+        slope, intercept = np.polyfit(idx, window, 1)
+        resid = window - (slope * idx + intercept)
+        k = int(np.argmax(resid))
+        return float(resid[k]), float(self.sr / (lo + k))
 
     def _frame(self, x):
         spec = np.abs(np.fft.rfft(x * self.win)) ** 2 + 1e-20
@@ -48,7 +97,8 @@ class BandEnergyDetector:
         bi = np.flatnonzero(self.band)
         peak_f = float(self.freqs[bi[np.argmax(spec[bi])]])
         octs = [10 * math.log10(spec[m].mean()) for m in self.oct_masks]
-        return db, peak_f, octs
+        cpp, f0 = self._cpp(spec)
+        return db, peak_f, octs, cpp, f0
 
     def process(self, t, x):
         """Feed audio; returns list of finished events (dicts)."""
@@ -84,16 +134,18 @@ class BandEnergyDetector:
             "rising": bool(self.cand) and self.active is None,
             "event_active": self.active is not None,
             "event_s": round(len(self.active) * self.frame_s, 1) if self.active else 0.0,
+            "harmonic": bool(self.last_cpp is not None and self.last_cpp >= self.harmonic_cpp_db),
             "warm": self.seen > self.warmup_frames,
         }
 
     def _step(self, t, x):
-        db, peak_f, octs = self._frame(x)
+        db, peak_f, octs, cpp, f0 = self._frame(x)
         self.last_db = db
+        self.last_cpp = cpp
         self.seen += 1
         floor = float(np.percentile(self.hist, self.pct)) if len(self.hist) > 10 else db
         self.floor = floor
-        fr = (t, db, peak_f, octs)
+        fr = (t, db, peak_f, octs, cpp, f0)
 
         if self.active is None:
             if self.seen > self.warmup_frames and db > floor + self.thr:
@@ -126,6 +178,16 @@ class BandEnergyDetector:
         # puts real energy into 100-400 Hz. The gap between those bands
         # separates the two cheaply, using features already computed.
         tilt = by_band["50-100"] - by_band["200-400"]
+
+        # Periodicity over the event. The median resists a single frame where a
+        # car or a door happened to land inside an otherwise noisy stretch.
+        cpps = np.array([f[4] for f in frames])
+        cpp = float(np.median(cpps))
+        harmonic = bool(cpp >= self.harmonic_cpp_db)
+        # F0 is only meaningful where the frame was actually periodic.
+        strong = cpps >= self.harmonic_cpp_db
+        f0 = float(np.median([f[5] for f, ok in zip(frames, strong) if ok])) if strong.any() else 0.0
+
         return {
             "start": float(ts[0]),
             "end": float(ts[-1] + self.frame_s),
@@ -137,5 +199,12 @@ class BandEnergyDetector:
             "dominant_hz": round(float(np.median([f[2] for f in frames])), 1),
             "octave_db": by_band,
             "low_tilt_db": round(float(tilt), 1),
-            "likely_wind": bool(tilt >= self.wind_tilt_db),
+            "cpp_db": round(cpp, 3),
+            "harmonic": harmonic,
+            "f0_hz": round(f0, 1),
+            # Wind is low-tilt AND aperiodic. Requiring both stops the tilt test
+            # from discarding a distant aircraft, whose spectrum is genuinely
+            # low-tilt because the atmosphere absorbs its high frequencies -
+            # which is exactly how a real B738 pass got thrown away as wind.
+            "likely_wind": bool(tilt >= self.wind_tilt_db and not harmonic),
         }

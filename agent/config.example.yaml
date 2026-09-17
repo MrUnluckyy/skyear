@@ -33,6 +33,7 @@ detector:
   floor_percentile: 20
   warmup_s: 30
   wind_tilt_db: 20          # 50-100 Hz minus 200-400 Hz above this = wind, not aircraft
+  harmonic_cpp_db: 0.12     # periodicity above this = an engine, not noise
 
 matching:
   max_range_m: 12000        # aircraft further than this are not linked to a sound

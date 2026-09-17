@@ -107,6 +107,12 @@ Deno.serve(async (req) => {
       snr_db: num(e.snr_db),
       dominant_hz: num(e.dominant_hz),
       low_tilt_db: num(e.low_tilt_db),
+      // Periodicity. Stored for every event, noise included: a labelled corpus
+      // of what the wind sounds like here is what a classifier needs as
+      // negatives.
+      cpp_db: num(e.cpp_db),
+      harmonic: Boolean(e.harmonic),
+      f0_hz: num(e.f0_hz),
       likely_wind: Boolean(e.likely_wind),
       octave_db: e.octave_db ?? null,
       match_hex: best ? String(best.hex ?? "") || null : null,
