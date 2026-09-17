@@ -1,11 +1,20 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Map as MapLibreMap, NavigationControl } from "maplibre-gl";
 import type { GeoJSONSource } from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
 import { createClient } from "@/lib/supabase";
-import type { Aircraft, PublicDetection, PublicSensor } from "@/lib/types";
+import {
+  noiseBaseline,
+  observedWindow,
+  type Aircraft,
+  type PublicDetection,
+  type PublicSensor,
+  type SensorStats,
+  type TypeStats,
+} from "@/lib/types";
+import { DetectionRow, OctaveBars, SensorBeacon } from "./SensorBeacon";
 
 const VILNIUS: [number, number] = [25.34, 54.65];
 
@@ -28,11 +37,8 @@ const STYLES: Record<Theme, string> = {
   light: "https://basemaps.cartocdn.com/gl/positron-gl-style/style.json",
 };
 
-
-const AIRCRAFT_COLOR = "#38bdf8";
-const GROUND_COLOR = "#64748b";
-const SENSOR_COLOR = "#22c55e";
-const SENSOR_OFFLINE = "#94a3b8";
+const FROST = "#c9e2f0";
+const GROUND = "#55697a";
 
 function aircraftFeatures(list: Aircraft[]) {
   return {
@@ -40,18 +46,11 @@ function aircraftFeatures(list: Aircraft[]) {
     features: list.map((a) => ({
       type: "Feature" as const,
       geometry: { type: "Point" as const, coordinates: [a.lon, a.lat] },
-      properties: { label: a.flight ?? a.hex, alt: a.alt_m, onGround: a.alt_m <= 0 },
-    })),
-  };
-}
-
-function sensorFeatures(list: PublicSensor[]) {
-  return {
-    type: "FeatureCollection" as const,
-    features: list.map((s) => ({
-      type: "Feature" as const,
-      geometry: { type: "Point" as const, coordinates: [s.lon, s.lat] },
-      properties: { online: s.online },
+      properties: {
+        label: a.flight ?? a.hex,
+        alt: a.alt_m,
+        onGround: a.alt_m <= 0,
+      },
     })),
   };
 }
@@ -59,57 +58,34 @@ function sensorFeatures(list: PublicSensor[]) {
 export default function SkyMap() {
   const container = useRef<HTMLDivElement>(null);
   const map = useRef<MapLibreMap | null>(null);
+  const [ready, setReady] = useState(false);
   const [theme, setTheme] = useState<Theme>("dark");
+
   const [aircraft, setAircraft] = useState<Aircraft[]>([]);
   const [sensors, setSensors] = useState<PublicSensor[]>([]);
   const [detections, setDetections] = useState<PublicDetection[]>([]);
+  const [stats, setStats] = useState<SensorStats[]>([]);
+  const [types, setTypes] = useState<TypeStats[]>([]);
   const [error, setError] = useState<string | null>(null);
 
-  // Latest data and theme, so layers re-added after a style swap are current.
-  const latest = useRef({ aircraft, sensors });
-  latest.current = { aircraft, sensors };
+  // Screen positions for the DOM overlay, reprojected as the map moves.
+  const [points, setPoints] = useState<Record<string, { x: number; y: number }>>({});
+  // Bumped when a sensor reports something new, which drives the arrival flare.
+  const [flares, setFlares] = useState<Record<string, number>>({});
+  const seen = useRef<Set<string>>(new Set());
+  const first = useRef(true);
+
+  const latest = useRef({ aircraft });
+  latest.current = { aircraft };
   const themeRef = useRef<Theme>(theme);
   themeRef.current = theme;
 
-  /**
-   * Swapping a vector style discards every custom source and layer, so this
-   * runs on each `style.load`, not once on `load`.
-   */
   const addLayers = useCallback((m: MapLibreMap, forTheme: Theme) => {
-    const halo = forTheme === "dark" ? "#0b1220" : "#ffffff";
-    const text = forTheme === "dark" ? "#e2e8f0" : "#1f2933";
+    const halo = forTheme === "dark" ? "#080d12" : "#ffffff";
+    const text = forTheme === "dark" ? "#c9e2f0" : "#1f2933";
 
     if (!m.getSource("aircraft")) {
       m.addSource("aircraft", { type: "geojson", data: aircraftFeatures(latest.current.aircraft) });
-    }
-    if (!m.getSource("sensors")) {
-      m.addSource("sensors", { type: "geojson", data: sensorFeatures(latest.current.sensors) });
-    }
-    if (!m.getLayer("sensor-halo")) {
-      m.addLayer({
-        id: "sensor-halo",
-        type: "circle",
-        source: "sensors",
-        paint: {
-          "circle-radius": 16,
-          "circle-color": ["case", ["get", "online"], SENSOR_COLOR, SENSOR_OFFLINE],
-          "circle-opacity": 0.2,
-          "circle-blur": 0.4,
-        },
-      });
-    }
-    if (!m.getLayer("sensor-dot")) {
-      m.addLayer({
-        id: "sensor-dot",
-        type: "circle",
-        source: "sensors",
-        paint: {
-          "circle-radius": 5,
-          "circle-color": ["case", ["get", "online"], SENSOR_COLOR, SENSOR_OFFLINE],
-          "circle-stroke-width": 2,
-          "circle-stroke-color": halo,
-        },
-      });
     }
     if (!m.getLayer("aircraft-dot")) {
       m.addLayer({
@@ -117,10 +93,11 @@ export default function SkyMap() {
         type: "circle",
         source: "aircraft",
         paint: {
-          "circle-radius": ["case", ["get", "onGround"], 3, 5],
-          "circle-color": ["case", ["get", "onGround"], GROUND_COLOR, AIRCRAFT_COLOR],
-          "circle-stroke-width": 1,
+          "circle-radius": ["case", ["get", "onGround"], 2.5, 4.5],
+          "circle-color": ["case", ["get", "onGround"], GROUND, FROST],
+          "circle-stroke-width": ["case", ["get", "onGround"], 0, 1],
           "circle-stroke-color": halo,
+          "circle-opacity": ["case", ["get", "onGround"], 0.5, 1],
         },
       });
     }
@@ -133,58 +110,85 @@ export default function SkyMap() {
         layout: {
           "text-field": ["get", "label"],
           "text-font": ["Open Sans Regular"],
-          "text-size": 11,
-          "text-offset": [0, 1.1],
+          "text-size": 10,
+          "text-offset": [0, 1.2],
           "text-anchor": "top",
+          "text-letter-spacing": 0.04,
         },
-        paint: { "text-color": text, "text-halo-color": halo, "text-halo-width": 1.4 },
+        paint: { "text-color": text, "text-halo-color": halo, "text-halo-width": 1.6 },
       });
     }
   }, []);
 
+  // --- map ----------------------------------------------------------------
   useEffect(() => {
     if (map.current || !container.current) return;
     const m = new MapLibreMap({
       container: container.current,
       style: STYLES.dark,
       center: VILNIUS,
-      zoom: 10,
-      // The CARTO styles carry their own OSM + CARTO attribution; adding ours
-      // on top rendered it twice.
+      zoom: 10.2,
       attributionControl: { compact: true },
     });
     m.addControl(new NavigationControl({ showCompass: false }), "top-right");
 
-    // MapLibre swallows style and tile failures unless you listen for them.
     m.on("error", (e) => {
       const msg = (e as unknown as { error?: { message?: string } }).error?.message ?? String(e);
       console.error("[skyear] map error:", msg);
-      setError(msg);
     });
 
-    // The map is constructed while the dynamic-import placeholder is still
-    // swapping out, so the container can be zero-height for a frame. MapLibre
-    // does not re-check on its own: without this the style loads, the layers
-    // attach, and not one tile is ever requested - silently.
+    // Built while the dynamic-import placeholder is still swapping out, so the
+    // container can be zero-height for a frame. Without this, the style loads,
+    // layers attach, and not one tile is ever requested.
     const ro = new ResizeObserver(() => m.resize());
     ro.observe(container.current);
 
     m.on("style.load", () => {
       addLayers(m, themeRef.current);
       map.current = m;
+      setReady(true);
     });
 
     return () => {
       ro.disconnect();
       m.remove();
       map.current = null;
+      setReady(false);
     };
   }, [addLayers]);
 
   useEffect(() => {
-    map.current?.setStyle(STYLES[theme]); // style.load re-adds our layers
+    map.current?.setStyle(STYLES[theme]);
   }, [theme]);
 
+  // Keep the overlay pinned to geography rather than pixels.
+  const reproject = useCallback((list: PublicSensor[]) => {
+    const m = map.current;
+    if (!m) return;
+    const next: Record<string, { x: number; y: number }> = {};
+    for (const s of list) {
+      const p = m.project([s.lon, s.lat]);
+      next[s.id] = { x: p.x, y: p.y };
+    }
+    setPoints(next);
+  }, []);
+
+  useEffect(() => {
+    const m = map.current;
+    if (!m || !ready) return;
+    const update = () => reproject(sensors);
+    update();
+    m.on("move", update);
+    m.on("zoom", update);
+    m.on("resize", update);
+    return () => {
+      m.off("move", update);
+      m.off("zoom", update);
+      m.off("resize", update);
+    };
+  }, [ready, sensors, reproject]);
+
+  // --- live ADS-B through our proxy ---------------------------------------
   useEffect(() => {
     let alive = true;
     const tick = async () => {
@@ -193,7 +197,7 @@ export default function SkyMap() {
         const json = await res.json();
         if (alive && Array.isArray(json.aircraft)) setAircraft(json.aircraft);
       } catch {
-        /* transient - the proxy serves stale data on upstream failure */
+        /* the proxy serves stale data on upstream failure */
       }
     };
     tick();
@@ -210,25 +214,38 @@ export default function SkyMap() {
    * Realtime on `detections` cannot work for visitors: the table is not in the
    * supabase_realtime publication, and adding it would not help, because
    * Realtime honours RLS and anon has no select policy on that table - by
-   * design, since it holds noise rows and undelayed drone matches. Subscribing
-   * to the base table would mean either a dead channel or relaxing the privacy
-   * boundary. The agent uploads every 30 s, so polling matches the real update
-   * rate anyway.
+   * design, since it holds noise rows and undelayed drone matches. The agent
+   * uploads every 30 s, so polling matches the real update rate anyway.
    */
   useEffect(() => {
     const supabase = createClient();
     let alive = true;
 
     const load = async () => {
-      const [s, d] = await Promise.all([
+      const [s, d, st, ty] = await Promise.all([
         supabase.from("public_sensors").select("*"),
-        supabase.from("public_detections").select("*").order("started_at", { ascending: false }).limit(50),
+        supabase.from("public_detections").select("*").order("started_at", { ascending: false }).limit(60),
+        supabase.from("public_sensor_stats").select("*"),
+        supabase.from("public_type_stats").select("*").order("passes", { ascending: false }),
       ]);
       if (!alive) return;
-      if (s.error) setError(s.error.message);
-      else setError(null);
+      setError(s.error ? s.error.message : null);
       setSensors((s.data as PublicSensor[]) ?? []);
-      setDetections((d.data as PublicDetection[]) ?? []);
+      setStats((st.data as SensorStats[]) ?? []);
+      setTypes((ty.data as TypeStats[]) ?? []);
+
+      const rows = (d.data as PublicDetection[]) ?? [];
+      setDetections(rows);
+
+      // Flare only for detections that arrived after this page loaded.
+      const fresh: Record<string, number> = {};
+      for (const row of rows) {
+        if (seen.current.has(row.id)) continue;
+        seen.current.add(row.id);
+        if (!first.current) fresh[row.sensor_id] = Date.now();
+      }
+      first.current = false;
+      if (Object.keys(fresh).length) setFlares((prev) => ({ ...prev, ...fresh }));
     };
 
     load();
@@ -240,77 +257,244 @@ export default function SkyMap() {
   }, []);
 
   useEffect(() => {
-    (map.current?.getSource("aircraft") as GeoJSONSource | undefined)?.setData(aircraftFeatures(aircraft));
+    (map.current?.getSource("aircraft") as GeoJSONSource | undefined)?.setData(
+      aircraftFeatures(aircraft)
+    );
   }, [aircraft]);
 
-  useEffect(() => {
-    (map.current?.getSource("sensors") as GeoJSONSource | undefined)?.setData(sensorFeatures(sensors));
-  }, [sensors]);
+  // --- derived ------------------------------------------------------------
+  const total = useMemo(
+    () =>
+      stats.reduce(
+        (acc, s) => ({
+          passes: acc.passes + s.passes_24h,
+          heard: acc.heard + s.heard_24h,
+          detections: acc.detections + s.detections_24h,
+          wind: acc.wind + s.wind_24h,
+        }),
+        { passes: 0, heard: 0, detections: 0, wind: 0 }
+      ),
+    [stats]
+  );
 
+  const baseline = noiseBaseline(stats[0]);
+  const heardRate = total.passes ? total.heard / total.passes : null;
   const airborne = aircraft.filter((a) => a.alt_m > 0).length;
-  const panel =
-    "rounded-xl border border-white/10 bg-neutral-900/80 text-neutral-100 shadow-xl backdrop-blur-md";
+  const newest = detections[0] ?? null;
+  const online = sensors.filter((s) => s.online).length;
 
   return (
-    <div className="relative h-dvh w-full bg-neutral-950">
-      <div ref={container} className="h-full w-full" />
+    <div className="relative h-dvh w-full overflow-hidden bg-night-deep">
+      {/*
+        maplibre-gl.css forces `position: relative` on its container, which
+        overrides an `absolute inset-0` and collapses the element to zero
+        height - style loads, layers attach, no tile is ever requested. Keep the
+        positioning on a wrapper and let the map own a plain full-size box.
+      */}
+      <div className="absolute inset-0">
+        <div ref={container} className="h-full w-full" />
+      </div>
 
-      <div className="pointer-events-none absolute left-0 top-0 p-3">
-        <div className={`pointer-events-auto w-60 p-3 ${panel}`}>
+      {/* Sensors, drawn in the DOM so the arrival animation can be CSS. */}
+      <div className="pointer-events-none absolute inset-0 overflow-hidden">
+        {sensors.map((s) => {
+          const p = points[s.id];
+          if (!p) return null;
+          const flare = flares[s.id] ?? 0;
+          const bearing = flare && newest?.sensor_id === s.id ? newest.match_bearing : null;
+          return (
+            <div key={s.id} className="absolute" style={{ left: p.x, top: p.y }}>
+              <SensorBeacon
+                online={s.online}
+                flareKey={flare}
+                bearing={bearing}
+                label={s.online ? "listening" : "offline"}
+              />
+            </div>
+          );
+        })}
+      </div>
+
+      {/* Instrument rail. Flush to the edge rather than a floating card. */}
+      <aside className="absolute inset-y-0 left-0 z-10 flex w-[304px] max-w-[86vw] flex-col border-r border-edge bg-night/92 backdrop-blur-xl">
+        <header className="border-b border-edge px-5 py-4">
           <div className="flex items-start justify-between">
             <div>
-              <h1 className="text-sm font-semibold tracking-tight">SkyEar</h1>
-              <p className="mt-0.5 text-[11px] text-neutral-400">
-                Acoustic aircraft detection · Vilnius
-              </p>
+              <h1 className="text-[17px] font-medium tracking-tight text-bone">SkyEar</h1>
+              <p className="mt-0.5 text-[12px] text-slate">Vilnius · security cameras as ears</p>
             </div>
             <button
               onClick={() => setTheme((t) => (t === "dark" ? "light" : "dark"))}
-              className="rounded-md border border-white/10 px-1.5 py-0.5 text-[11px] text-neutral-300 hover:bg-white/10"
-              aria-label="Toggle basemap theme"
+              className="rounded border border-edge px-1.5 py-0.5 text-[11px] text-slate hover:border-sodium hover:text-sodium"
+              aria-label={theme === "dark" ? "Switch to light map" : "Switch to dark map"}
             >
               {theme === "dark" ? "☀" : "☾"}
             </button>
           </div>
 
-          <dl className="mt-3 grid grid-cols-3 gap-2 text-[11px]">
-            {([["Airborne", airborne], ["Sensors", sensors.length], ["Events", detections.length]] as const).map(
-              ([label, value]) => (
-                <div key={label}>
-                  <dt className="text-neutral-500">{label}</dt>
-                  <dd className="font-mono text-base leading-tight text-neutral-100">{value}</dd>
+          <p className="mt-3 flex items-center gap-2 text-[12px]">
+            <span
+              className="breathe inline-block h-1.5 w-1.5 rounded-full"
+              style={{ background: online ? "var(--sodium)" : "var(--slate-dim)" }}
+            />
+            <span className="text-slate">
+              {online > 0
+                ? `${online} sensor${online > 1 ? "s" : ""} listening`
+                : "No sensor listening"}
+            </span>
+          </p>
+        </header>
+
+        <div className="scroll-thin flex-1 overflow-y-auto pb-4">
+          {/* The measurement the project turns on. */}
+          <section className="border-b border-edge px-5 py-4">
+            <div className="flex items-baseline gap-2">
+              <span className="font-mono text-[34px] leading-none text-bone">
+                {heardRate === null ? "--" : `${Math.round(heardRate * 100)}`}
+                <span className="text-[18px] text-slate">%</span>
+              </span>
+              <span className="text-[12px] text-slate">of passes heard</span>
+            </div>
+            <p className="mt-1 font-mono text-[11px] text-slate-dim">
+              {total.heard}/{total.passes} aircraft · {observedWindow(stats[0])}
+            </p>
+
+            {/* A heard rate has to beat the noise it is swimming in. */}
+            {baseline !== null && (
+              <div className="mt-3">
+                <div className="relative h-1.5 overflow-hidden rounded-full bg-haze">
+                  <div
+                    className="absolute inset-y-0 left-0 rounded-full"
+                    style={{
+                      width: `${(heardRate ?? 0) * 100}%`,
+                      background: "var(--sodium)",
+                    }}
+                  />
+                  <div
+                    className="absolute inset-y-0 w-px"
+                    style={{ left: `${baseline * 100}%`, background: "var(--noise)" }}
+                  />
                 </div>
-              )
+                <p className="mt-2 text-[11px] leading-snug text-slate-dim">
+                  Background noise fills{" "}
+                  <span className="font-mono text-noise">{Math.round(baseline * 100)}%</span> of the
+                  time, so roughly that share of passes overlaps a sound by chance. Detection only
+                  starts above the marked line.
+                </p>
+              </div>
             )}
-          </dl>
+          </section>
+
+          {/* Per type: the comparison that shows whether some airframes hide. */}
+          {types.length > 0 && (
+            <section className="border-b border-edge px-5 py-4">
+              <h2 className="text-[12px] text-slate">Heard by aircraft type</h2>
+              <ul className="mt-3 space-y-2">
+                {types.slice(0, 7).map((t) => {
+                  const rate = t.passes ? t.heard / t.passes : 0;
+                  return (
+                    <li key={t.aircraft_type} className="grid grid-cols-[42px_1fr_auto] items-center gap-2">
+                      <span className="font-mono text-[11px] text-bone">{t.aircraft_type}</span>
+                      <span className="h-1.5 overflow-hidden rounded-full bg-haze">
+                        <span
+                          className="block h-full rounded-full"
+                          style={{
+                            width: `${Math.max(rate * 100, t.heard ? 6 : 0)}%`,
+                            background: t.heard ? "var(--signal)" : "transparent",
+                          }}
+                        />
+                      </span>
+                      <span className="font-mono text-[10px] text-slate-dim">
+                        {t.heard}/{t.passes}
+                      </span>
+                    </li>
+                  );
+                })}
+              </ul>
+            </section>
+          )}
+
+          {/* What the ear is sitting in. */}
+          <section className="border-b border-edge px-5 py-4">
+            <h2 className="text-[12px] text-slate">Conditions</h2>
+            <dl className="mt-3 grid grid-cols-2 gap-x-3 gap-y-3">
+              {[
+                ["Noise floor", stats[0]?.avg_floor_db != null ? `${stats[0].avg_floor_db} dB` : "--"],
+                ["Events", String(total.detections)],
+                ["Wind-tagged", String(total.wind)],
+                ["Aircraft up", String(airborne)],
+              ].map(([label, value]) => (
+                <div key={label}>
+                  <dt className="text-[11px] text-slate-dim">{label}</dt>
+                  <dd className="font-mono text-[15px] text-bone">{value}</dd>
+                </div>
+              ))}
+            </dl>
+            {total.wind > 0 && (
+              <p className="mt-3 text-[11px] leading-snug text-slate-dim">
+                <span className="text-noise">{total.wind}</span> of {total.detections} events looked
+                like wind and were kept off this map.
+              </p>
+            )}
+          </section>
 
           {sensors.length === 0 && (
-            <p className="mt-3 border-t border-white/10 pt-2 text-[11px] leading-snug text-amber-400/90">
-              No sensor has paired yet — the agent still writes only to local disk. Aircraft shown
-              are live ADS-B.
+            <section className="px-5 py-4">
+              <p className="text-[12px] leading-snug text-sodium/90">
+                No sensor has paired yet. Generate a code on{" "}
+                <a href="/devices" className="underline">
+                  your devices page
+                </a>{" "}
+                and run the agent on the machine with the camera.
+              </p>
+            </section>
+          )}
+
+          {error && (
+            <section className="px-5 py-4">
+              <p className="text-[12px] text-red-400">{error}</p>
+            </section>
+          )}
+        </div>
+
+        <footer className="border-t border-edge px-5 py-3">
+          <a href="/devices" className="text-[12px] text-slate hover:text-sodium">
+            Manage sensors
+          </a>
+        </footer>
+      </aside>
+
+      {/* The most recent sound, in enough detail to judge it. */}
+      {newest && (
+        <section className="absolute bottom-0 right-0 z-10 m-4 w-[332px] max-w-[86vw] rounded-sm border border-edge bg-night/92 shadow-[0_18px_50px_-12px_rgba(0,0,0,0.8)] backdrop-blur-xl">
+          <div className="flex items-start justify-between border-b border-edge px-4 py-3">
+            <div>
+              <h2 className="text-[13px] text-bone">
+                {newest.match_flight ?? "Sound with no aircraft overhead"}
+              </h2>
+              <p className="mt-0.5 font-mono text-[11px] text-slate-dim">
+                {new Date(newest.started_at).toLocaleTimeString()}
+                {newest.match_type ? ` · ${newest.match_type}` : ""}
+                {newest.match_slant_m ? ` · ${(newest.match_slant_m / 1000).toFixed(1)} km away` : ""}
+              </p>
+            </div>
+            <OctaveBars octaves={newest.octave_db} />
+          </div>
+
+          {newest.match_delay_s !== null && (
+            <p className="border-b border-edge px-4 py-2 text-[11px] leading-snug text-slate">
+              Heard{" "}
+              <span className="font-mono text-sodium">{newest.match_delay_s.toFixed(1)} s</span>{" "}
+              after it left the aircraft — the sound is that far behind the sky.
             </p>
           )}
-          {error && <p className="mt-2 text-[11px] text-red-400">{error}</p>}
-        </div>
-      </div>
 
-      {detections.length > 0 && (
-        <div
-          className={`pointer-events-auto absolute bottom-0 right-0 m-3 max-h-64 w-72 overflow-y-auto p-3 text-[11px] ${panel}`}
-        >
-          <h2 className="mb-1.5 font-semibold">Recent detections</h2>
-          <ul className="space-y-1">
-            {detections.map((d) => (
-              <li key={d.id} className="flex justify-between gap-2">
-                <span className="font-mono text-neutral-400">
-                  {new Date(d.started_at).toLocaleTimeString()}
-                </span>
-                <span className="truncate">{d.match_flight ?? d.class}</span>
-                <span className="text-neutral-500">{Math.round(d.duration_s)}s</span>
-              </li>
+          <ul className="scroll-thin max-h-[38vh] divide-y divide-edge/60 overflow-y-auto">
+            {detections.slice(0, 14).map((d, i) => (
+              <DetectionRow key={d.id} detection={d} active={i === 0} />
             ))}
           </ul>
-        </div>
+        </section>
       )}
     </div>
   );

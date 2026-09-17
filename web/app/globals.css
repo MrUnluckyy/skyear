@@ -1,26 +1,110 @@
 @import "tailwindcss";
 
+/**
+ * SkyEar.
+ *
+ * Colour carries meaning, not decoration: sodium is us listening from the
+ * ground, frost is the machine overhead, signal marks a confirmed hear, and
+ * noise is the wind that keeps pretending to be an aircraft.
+ */
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  --night: #0d141a;
+  --night-deep: #080d12;
+  --haze: #17222b;
+  --edge: #22303b;
+
+  --sodium: #f0a94c;
+  --frost: #c9e2f0;
+  --signal: #57d1a8;
+  --noise: #7c7a9e;
+
+  --bone: #e6edf2;
+  --slate: #7d95a4;
+  --slate-dim: #55697a;
 }
 
 @theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+  --color-night: var(--night);
+  --color-night-deep: var(--night-deep);
+  --color-haze: var(--haze);
+  --color-edge: var(--edge);
+  --color-sodium: var(--sodium);
+  --color-frost: var(--frost);
+  --color-signal: var(--signal);
+  --color-noise: var(--noise);
+  --color-bone: var(--bone);
+  --color-slate: var(--slate);
+  --color-slate-dim: var(--slate-dim);
+  --font-sans: var(--font-display);
+  --font-mono: var(--font-mono);
 }
 
 body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  background: var(--night-deep);
+  color: var(--bone);
+  font-family: var(--font-display), system-ui, sans-serif;
 }
+
+/**
+ * Wavefronts arrive at a microphone; they do not leave it. The rings collapse
+ * inward for that reason - the opposite of a radar sweep, and the one piece of
+ * continuous motion on the page.
+ */
+@keyframes arrive {
+  from {
+    transform: scale(1);
+    opacity: 0;
+  }
+  15% {
+    opacity: 0.55;
+  }
+  to {
+    transform: scale(0.12);
+    opacity: 0;
+  }
+}
+
+/* A sound landed: the ear flares once. */
+@keyframes flare {
+  0% { transform: scale(1); box-shadow: 0 0 0 0 rgba(240, 169, 76, 0.55); }
+  55% { transform: scale(1.5); box-shadow: 0 0 0 14px rgba(240, 169, 76, 0); }
+  100% { transform: scale(1); box-shadow: 0 0 0 0 rgba(240, 169, 76, 0); }
+}
+
+@keyframes bearing-sweep {
+  from { opacity: 0; transform: scaleX(0.1); }
+  35%  { opacity: 0.9; }
+  to   { opacity: 0; transform: scaleX(1); }
+}
+
+@keyframes breathe {
+  0%, 100% { opacity: 0.35; }
+  50% { opacity: 0.8; }
+}
+
+.ring-arrive { animation: arrive 3.4s cubic-bezier(0.3, 0, 0.2, 1) infinite; }
+.ear-flare { animation: flare 1.1s ease-out; }
+.bearing-ray { animation: bearing-sweep 2.4s ease-out forwards; transform-origin: left center; }
+.breathe { animation: breathe 3.4s ease-in-out infinite; }
+
+/* Silence every ambient loop for anyone who asked for less motion. */
+@media (prefers-reduced-motion: reduce) {
+  .ring-arrive,
+  .ear-flare,
+  .bearing-ray,
+  .breathe {
+    animation: none;
+  }
+  .ring-arrive { opacity: 0.28; }
+}
+
+::selection { background: var(--sodium); color: var(--night-deep); }
+
+*:focus-visible {
+  outline: 2px solid var(--sodium);
+  outline-offset: 2px;
+}
+
+.scroll-thin::-webkit-scrollbar { width: 6px; }
+.scroll-thin::-webkit-scrollbar-thumb { background: var(--edge); border-radius: 3px; }
+.scroll-thin::-webkit-scrollbar-track { background: transparent; }
