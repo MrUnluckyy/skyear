@@ -3,6 +3,10 @@ services:
     # Published multi-arch image (amd64 for Synology, arm64 for Raspberry Pi).
     # Comment `image` and uncomment `build` to run your own changes instead.
     image: ghcr.io/mrunluckyy/skyear-agent:latest
+    # Without this, Docker keeps serving whatever :latest it cached the first
+    # time, which is how a tester ended up in a restart loop running an image
+    # several releases old.
+    pull_policy: always
     # build: .
     container_name: skyear-agent
     restart: unless-stopped

@@ -45,6 +45,7 @@ const STEPS: Step[] = [
 services:
   skyear:
     image: ghcr.io/mrunluckyy/skyear-agent:latest
+    pull_policy: always
     container_name: skyear-agent
     restart: unless-stopped
     ports: ["8088:8088"]
@@ -52,7 +53,7 @@ services:
 
 # Or, on any machine with a terminal. One line on purpose: pasted
 # multi-line commands get split by some terminals and fail confusingly.
-docker run -d --name skyear --restart unless-stopped -p 8088:8088 -v skyear-data:/data ghcr.io/mrunluckyy/skyear-agent:latest`,
+docker run -d --name skyear --restart unless-stopped --pull always -p 8088:8088 -v skyear-data:/data ghcr.io/mrunluckyy/skyear-agent:latest`,
     expect: `The container starts and its log says:
 
   setup page: http://192.168.1.144:8088
@@ -64,6 +65,7 @@ That is expected. Nothing is configured yet.`,
       { problem: "Port 8088 already used.", fix: "Change the first number, for example 9088:8088, and use that port below." },
       { problem: "\u201cThe container name /skyear is already in use.\u201d", fix: "An earlier attempt left one behind. Remove it with: docker rm -f skyear — then run the command again." },
       { problem: "\u201ccommand not found: ghcr.io\u201d", fix: "The command was split across lines by the terminal. Copy it as the single line above, with no line breaks." },
+      { problem: "It restarts in a loop, and the log says FileNotFoundError: /config/config.yaml", fix: "An old image is cached locally. docker rm -f skyear, then run the command again - --pull always fetches the current one." },
     ],
   },
   {
