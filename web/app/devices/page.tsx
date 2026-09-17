@@ -47,6 +47,10 @@ export default function Devices() {
     load();
   }, [load]);
 
+  // Unused codes only; the snippets below embed the newest one so there is
+  // nothing to retype.
+  const live = codes.filter((c) => !c.used_at && new Date(c.expires_at) > new Date());
+
   async function createCode() {
     setBusy(true);
     setError(null);
@@ -65,8 +69,6 @@ export default function Devices() {
     await load();
     setBusy(false);
   }
-
-  const live = codes.filter((c) => !c.used_at && new Date(c.expires_at) > new Date());
 
   if (!email) {
     return (
@@ -98,14 +100,25 @@ export default function Devices() {
         <section className="rounded-xl border border-white/10 bg-neutral-900/70 p-5">
           <h2 className="text-sm font-semibold">Pair an agent</h2>
           <p className="mt-1 text-sm text-neutral-400">
-            Generate a code, then run this on the machine with the camera:
+            Generate a code, then run this on the machine with the camera — the one
+            holding the credentials, not this browser.
           </p>
-          <pre className="mt-2 overflow-x-auto rounded-lg bg-neutral-950 p-3 text-xs text-neutral-300">
-python -m skyear.main --config config.yaml --data ./out --pair CODE
+
+          <p className="mt-3 text-xs font-medium text-neutral-400">Local install (venv)</p>
+          <pre className="mt-1 overflow-x-auto rounded-lg bg-neutral-950 p-3 text-xs text-neutral-300">
+{`cd ~/Sites/dronar/agent
+.venv/bin/python -m skyear.main --config config.yaml --data ./out --pair ${live[0]?.code ?? "CODE"}`}
+          </pre>
+
+          <p className="mt-3 text-xs font-medium text-neutral-400">Docker (Synology, Raspberry Pi)</p>
+          <pre className="mt-1 overflow-x-auto rounded-lg bg-neutral-950 p-3 text-xs text-neutral-300">
+{`docker compose run --rm skyear --pair ${live[0]?.code ?? "CODE"}`}
           </pre>
           <p className="mt-2 text-xs text-neutral-500">
-            The code is single-use and expires in {TTL_MINUTES} minutes. Your camera address and
-            password never leave that machine.
+            Use <code className="text-neutral-400">python3</code> or the venv interpreter —
+            plain <code className="text-neutral-400">python</code> does not exist on macOS. The code
+            is single-use and expires in {TTL_MINUTES} minutes; your camera address and password
+            never leave that machine.
           </p>
 
           <button
