@@ -16,7 +16,8 @@ import {
 } from "@/lib/types";
 import { DetectionRow, OctaveBars, SensorBeacon } from "./SensorBeacon";
 
-const VILNIUS: [number, number] = [25.34, 54.65];
+/** Vilnius old town. A default centre should be a city, not a contributor's street. */
+const VILNIUS: [number, number] = [25.2797, 54.6872];
 
 /**
  * CARTO vector basemaps: modern, keyless, free with attribution.
@@ -172,6 +173,27 @@ export default function SkyMap() {
     }
     setPoints(next);
   }, []);
+
+  // Frame the sensors that actually exist rather than assuming where they are.
+  const framed = useRef(false);
+  useEffect(() => {
+    const m = map.current;
+    if (!m || !ready || framed.current || sensors.length === 0) return;
+    framed.current = true;
+    if (sensors.length === 1) {
+      m.easeTo({ center: [sensors[0].lon, sensors[0].lat], zoom: 10.6, duration: 900 });
+      return;
+    }
+    const lons = sensors.map((s) => s.lon);
+    const lats = sensors.map((s) => s.lat);
+    m.fitBounds(
+      [
+        [Math.min(...lons), Math.min(...lats)],
+        [Math.max(...lons), Math.max(...lats)],
+      ],
+      { padding: { top: 80, bottom: 80, left: 360, right: 380 }, maxZoom: 11, duration: 900 }
+    );
+  }, [ready, sensors]);
 
   useEffect(() => {
     const m = map.current;

@@ -53,7 +53,7 @@ real detection range per aircraft type, and the labels for ML v0.2.
 - **Docker is not installed on this Mac.** Builds and live runs happen on the
   Synology (Container Manager) or a Pi. Locally, test with `--replay` and pytest.
 - `ffmpeg` / `ffprobe` are installed via Homebrew and work.
-- Reolink camera at `192.168.1.88`, user `admin`, audio 16 kHz mono on
+- Reolink camera on the LAN, user `admin`, audio 16 kHz mono on
   `rtsp://.../Preview_01_sub`. Password lives in `agent/.env` only.
 - **Chrome on macOS cannot reach the camera** (`ERR_ADDRESS_UNREACHABLE`) until
   Local Network permission is granted. `curl` and `ffmpeg` work regardless — so

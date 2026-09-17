@@ -11,9 +11,9 @@ Fixed outdoor sensors give it something that network lacks, so contributing data
 to droneradar is a later option.
 
 ## Hardware verified so far
-- Reolink camera at `192.168.1.88`, reachable over HTTP (port 80) and RTSP
+- Reolink camera at `192.168.1.50`, reachable over HTTP (port 80) and RTSP
   (port 554) with user `admin`. The password is not stored here.
-- Stream `rtsp://admin:***@192.168.1.88:554/Preview_01_sub` carries H.264 video
+- Stream `rtsp://admin:***@192.168.1.50:554/Preview_01_sub` carries H.264 video
   and AAC audio, 16 kHz, mono.
 - NAS: Synology (runs Container Manager). A spare camera is available, and a
   friend in another city will run a second agent.

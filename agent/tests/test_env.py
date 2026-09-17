@@ -66,13 +66,13 @@ def test_password_is_scrubbed_from_ffprobe_output():
     from skyear.main import _scrub
 
     pw = "p@ss w0rd/+"
-    err = (f"rtsp://admin:{quote(pw, safe='')}@192.168.1.88:554/Preview_01_sub: "
+    err = (f"rtsp://admin:{quote(pw, safe='')}@192.168.1.50:554/Preview_01_sub: "
            f"401 Unauthorized (raw {pw})")
     out = _scrub(err, pw)
     assert pw not in out
     assert quote(pw, safe="") not in out
     assert "***" in out
-    assert "192.168.1.88" in out   # the useful part survives
+    assert "192.168.1.50" in out   # the useful part survives
 
 
 def test_scrub_is_a_noop_without_a_secret():

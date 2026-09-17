@@ -23,7 +23,7 @@ const STEPS = [
     code: `cameras:
   - id: home-1
     type: reolink          # or hikvision | dahua | generic
-    host: 192.168.1.88
+    host: 192.168.1.50
     username: admin
     password_env: CAM1_PASSWORD
     lat: 54.6872           # where the camera physically is

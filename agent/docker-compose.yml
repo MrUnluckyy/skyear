@@ -1,7 +1,9 @@
 services:
   skyear:
-    build: .
-    image: skyear-agent:0.1
+    # Published multi-arch image (amd64 for Synology, arm64 for Raspberry Pi).
+    # Comment `image` and uncomment `build` to run your own changes instead.
+    image: ghcr.io/mrunluckyy/dronar-agent:latest
+    # build: .
     container_name: skyear-agent
     restart: unless-stopped
     env_file: .env
