@@ -153,16 +153,16 @@ class SetupHandler(BaseHTTPRequestHandler):
 
     # --- routes ----------------------------------------------------------
     def do_GET(self):
+        """Reads are open; only changes need the token.
+
+        Nothing readable here is a secret - the camera password is never
+        returned, and the rest is whether a camera is configured and what it is
+        hearing. Locking reads only managed to lock people out of their own
+        setup page while protecting nothing.
+        """
         route = urllib.parse.urlparse(self.path).path
         if route in ("/", "/index.html"):
             return self._send(self.page.encode(), "text/html; charset=utf-8")
-        if not self._authorised():
-            return self._json({
-                "error": "This agent is already configured, so setup is locked to the "
-                         "browser that set it up. To unlock another browser, open this page "
-                         "with ?t= followed by the token in data/setup_token "
-                         "(in Docker: docker exec skyear cat /data/setup_token).",
-            }, 403)
         if route == "/api/state":
             stored = config_store.load(self.data_dir)
             cams = stored.get("cameras", [])

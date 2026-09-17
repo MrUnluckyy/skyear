@@ -71,12 +71,29 @@ def test_open_before_anything_is_configured(agent):
     assert state["paired"] is False
 
 
-def test_locks_once_a_camera_password_is_stored(agent):
+def test_reading_status_stays_open(agent):
+    """Nothing readable is a secret: the password is never returned, and the
+    rest is whether a camera exists and what it hears. Locking reads only
+    locked people out of their own setup page."""
+    _, _, base = agent
+    post(base, "/api/save", {"camera": CAMERA, "secret": "hunter2"})
+    assert http_status(base, "/api/state") == 200
+
+
+def test_changes_are_locked_once_a_camera_password_is_stored(agent):
+    """Reconfiguring or re-pairing is what actually needs protecting."""
+    import urllib.error
     data, _, base = agent
     post(base, "/api/save", {"camera": CAMERA, "secret": "hunter2"})
-    assert http_status(base, "/api/state") == 403
+    try:
+        post(base, "/api/save", {"camera": CAMERA, "secret": "someone-elses"})
+        raise AssertionError("a second write should need the token")
+    except urllib.error.HTTPError as e:
+        assert e.code == 403
+    # with the token it goes through
     token = config_store.setup_token(data)
-    assert http_status(base, f"/api/state?t={token}") == 200
+    status, _ = post(base, f"/api/save?t={token}", {"camera": CAMERA, "secret": "mine"})
+    assert status == 200
 
 
 def test_password_is_never_returned_to_the_browser(agent):
@@ -172,11 +189,11 @@ def test_saving_returns_a_cookie_that_keeps_the_browser_authorised():
 
 
 def test_the_lock_message_says_how_to_get_back_in(agent):
-    import urllib.error, urllib.request
+    import urllib.error
     _, _, base = agent
     post(base, "/api/save", {"camera": CAMERA, "secret": "hunter2"})
     try:
-        urllib.request.urlopen(base + "/api/state", timeout=10)
+        post(base, "/api/save", {"camera": CAMERA, "secret": "again"})
         raise AssertionError("should be locked")
     except urllib.error.HTTPError as e:
         body = json.loads(e.read())
