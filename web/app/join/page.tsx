@@ -50,10 +50,9 @@ services:
     ports: ["8088:8088"]
     volumes: ["./data:/data"]
 
-# Or, on any machine with a terminal, one command and no files:
-docker run -d --name skyear --restart unless-stopped \\
-  -p 8088:8088 -v skyear-data:/data \\
-  ghcr.io/mrunluckyy/skyear-agent:latest`,
+# Or, on any machine with a terminal. One line on purpose: pasted
+# multi-line commands get split by some terminals and fail confusingly.
+docker run -d --name skyear --restart unless-stopped -p 8088:8088 -v skyear-data:/data ghcr.io/mrunluckyy/skyear-agent:latest`,
     expect: `The container starts and its log says:
 
   setup page: http://192.168.1.144:8088
@@ -63,6 +62,8 @@ That is expected. Nothing is configured yet.`,
     stuck: [
       { problem: "No Docker on the machine.", fix: "Synology: install Container Manager from Package Center. Linux or Raspberry Pi: curl -fsSL https://get.docker.com | sh" },
       { problem: "Port 8088 already used.", fix: "Change the first number, for example 9088:8088, and use that port below." },
+      { problem: "\u201cThe container name /skyear is already in use.\u201d", fix: "An earlier attempt left one behind. Remove it with: docker rm -f skyear — then run the command again." },
+      { problem: "\u201ccommand not found: ghcr.io\u201d", fix: "The command was split across lines by the terminal. Copy it as the single line above, with no line breaks." },
     ],
   },
   {
