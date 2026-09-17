@@ -199,3 +199,36 @@ def test_the_lock_message_says_how_to_get_back_in(agent):
         body = json.loads(e.read())
         assert "setup_token" in body["error"]
         assert "docker exec" in body["error"]
+
+
+def test_pairing_works_with_no_cloud_url_configured(agent, monkeypatch):
+    """An agent from the published image has no config file at all.
+
+    Without a built-in default it could not pair - "camera saved, but pairing
+    failed: no cloud url configured" - which made the whole wizard a dead end
+    on exactly the install path most people use.
+    """
+    from skyear import DEFAULT_CLOUD_URL
+    import skyear.setup_server as ss
+
+    seen = {}
+
+    def fake_pair(url, code, cameras, name="x"):
+        seen["url"] = url
+        return {"device_id": "abc", "token": "t", "cameras": [c["id"] for c in cameras]}
+
+    monkeypatch.setattr(ss, "pair", fake_pair)
+    data, _, base = agent
+    post(base, "/api/save", {"camera": CAMERA, "secret": "hunter2"})
+    token = config_store.setup_token(data)
+    status, body = post(base, f"/api/pair?t={token}", {"code": "K4M7PQR2"})
+    assert status == 200 and body.get("ok")
+    assert seen["url"] == DEFAULT_CLOUD_URL
+    assert (data / "device.json").is_file()
+
+
+def test_state_reports_where_it_will_connect(agent):
+    from skyear import DEFAULT_CLOUD_URL
+    _, _, base = agent
+    _, state = get(base, "/api/state")
+    assert state["cloud_url"] == DEFAULT_CLOUD_URL

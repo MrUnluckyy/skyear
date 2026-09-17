@@ -21,7 +21,7 @@ from .adsb import AdsbTracker
 from .audio import AudioSource, build_url
 from .detector import BandEnergyDetector
 from .matcher import PassTracker, match_event
-from . import config_store
+from . import DEFAULT_CLOUD_URL, config_store
 from .setup_server import serve as serve_setup
 from .uploader import CloudError, Uploader, pair
 
@@ -203,9 +203,7 @@ def device_file(out_dir: Path) -> Path:
 def make_uploader(cfg, out_dir: Path):
     """Build an Uploader if this agent has been paired, else None."""
     cloud = cfg.get("cloud", {})
-    url = cloud.get("url")
-    if not url:
-        return None
+    url = cloud.get("url") or DEFAULT_CLOUD_URL
     path = device_file(out_dir)
     if not path.is_file():
         log.warning("cloud.url is set but this agent is not paired yet - run --pair CODE")
@@ -221,10 +219,7 @@ def make_uploader(cfg, out_dir: Path):
 
 def run_pair(cfg, cams, out_dir: Path, code: str):
     cloud = cfg.get("cloud", {})
-    url = cloud.get("url")
-    if not url:
-        print("FAIL set cloud.url in config.yaml first")
-        return 1
+    url = cloud.get("url") or DEFAULT_CLOUD_URL
     path = device_file(out_dir)
     if path.is_file():
         print(f"FAIL already paired ({path}). Delete that file to pair again.")

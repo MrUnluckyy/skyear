@@ -20,7 +20,7 @@ import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
-from . import __version__, config_store
+from . import DEFAULT_CLOUD_URL, __version__, config_store
 from .audio import build_url, redact
 from .uploader import CloudError, coarse, pair
 
@@ -171,7 +171,7 @@ class SetupHandler(BaseHTTPRequestHandler):
                 "configured": bool(cams),
                 "paired": (self.data_dir / "device.json").is_file(),
                 "cameras": [{k: v for k, v in c.items() if k != "password"} for c in cams],
-                "cloud_url": (stored.get("cloud") or {}).get("url", ""),
+                "cloud_url": (stored.get("cloud") or {}).get("url") or DEFAULT_CLOUD_URL,
                 "live": self.live,
             })
         if route == "/api/level":
@@ -223,10 +223,9 @@ class SetupHandler(BaseHTTPRequestHandler):
 
         if route == "/api/pair":
             stored = config_store.load(self.data_dir)
-            url = body.get("cloud_url") or (stored.get("cloud") or {}).get("url")
+            url = (body.get("cloud_url") or (stored.get("cloud") or {}).get("url")
+                   or DEFAULT_CLOUD_URL)
             cams = stored.get("cameras", [])
-            if not url:
-                return self._json({"error": "no cloud url configured"}, 400)
             if not cams:
                 return self._json({"error": "add a camera first"}, 400)
             if (self.data_dir / "device.json").is_file():
