@@ -9,6 +9,13 @@ export const metadata: Metadata = {
 /** Setup genuinely is a sequence, so the steps are numbered. Nothing else is. */
 const STEPS = [
   {
+    title: "Get the agent",
+    body: "Everything runs from one folder: the agent, a config file, and a compose file that pulls a published image. Nothing is built from source unless you want to change it.",
+    code: `git clone https://github.com/MrUnluckyy/skyear.git
+cd skyear/agent`,
+    note: "The image ships for linux/amd64 and linux/arm64, so the same tag runs on a Synology and on a Raspberry Pi 4 or 5.",
+  },
+  {
     title: "Check your camera can hear",
     body: "Most security cameras carry a microphone on the sub-stream. This asks the camera what it streams and looks for an audio track. If you see codec_type=audio, you are in.",
     code: `ffprobe -v error -rtsp_transport tcp \\
@@ -208,9 +215,18 @@ export default function Join() {
           </a>
         </section>
 
-        <footer className="mt-16 border-t border-edge pt-6 text-[12px] leading-relaxed text-slate-dim">
-          Aircraft positions come from ADS-B, which is how each detection is checked automatically.
-          Sensor positions are shown on the public map rounded to about a kilometre.
+        <footer className="mt-16 flex flex-wrap items-center justify-between gap-3 border-t border-edge pt-6 text-[12px] leading-relaxed text-slate-dim">
+          <span className="max-w-[58ch]">
+            Aircraft positions come from ADS-B, which is how each detection is checked
+            automatically. Sensor positions are shown on the public map rounded to about a
+            kilometre.
+          </span>
+          <a
+            href="https://github.com/MrUnluckyy/skyear"
+            className="whitespace-nowrap text-slate hover:text-sodium"
+          >
+            Source on GitHub
+          </a>
         </footer>
       </div>
     </main>
