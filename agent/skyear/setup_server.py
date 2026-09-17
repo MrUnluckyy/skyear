@@ -215,11 +215,34 @@ class SetupHandler(BaseHTTPRequestHandler):
         return self._json({"error": "not found"}, 404)
 
 
+def lan_address() -> str | None:
+    """This machine's address on the local network.
+
+    Opening a UDP socket toward a public address reveals which local interface
+    the OS would route through, without sending anything. Inside Docker with
+    bridge networking this reports the container address rather than the host,
+    which is why the log says so and the guide tells people to use their NAS
+    address instead.
+    """
+    import socket
+    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    try:
+        s.connect(("8.8.8.8", 53))
+        return s.getsockname()[0]
+    except OSError:
+        return None
+    finally:
+        s.close()
+
+
 def serve(data_dir: Path, live: dict, port: int = 8088, host: str = "0.0.0.0") -> ThreadingHTTPServer:
     page = (Path(__file__).parent / "setup.html").read_text()
     handler = type("Bound", (SetupHandler,),
                    {"data_dir": Path(data_dir), "live": live, "page": page})
     httpd = ThreadingHTTPServer((host, port), handler)
     threading.Thread(target=httpd.serve_forever, daemon=True, name="setup").start()
-    log.info("setup page on http://<this-machine>:%d", port)
+    ip = lan_address()
+    log.info("setup page: http://%s:%d", ip or "<this-machine>", port)
+    if ip and ip.startswith("172."):
+        log.info("  (that is the container's address - use this machine's own, with :%d)", port)
     return httpd

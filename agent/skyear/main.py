@@ -331,8 +331,7 @@ def main():
             log.warning("setup page unavailable on port %d: %s", args.setup_port, e)
 
     if not cams:
-        log.warning("no camera configured yet - open http://<this-machine>:%d to set one up",
-                    args.setup_port)
+        log.warning("no camera configured yet - open the setup page above to add one")
         while not stop.is_set():
             stop.wait(1)
         return 0

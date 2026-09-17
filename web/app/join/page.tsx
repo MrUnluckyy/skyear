@@ -29,182 +29,68 @@ const STEPS: Step[] = [
   {
     where: "browser",
     title: "Create your account",
-    body: "Enter your email on the sign-in page. You get a one-time link by email — there is no password to choose. Click it and you land on your sensors page.",
+    body: "Enter your email. You get a one-time link back — there is no password to choose. Click it and you land on your sensors page, where you will generate a pairing code in a moment.",
     link: { href: "/login", label: "Open the sign-in page" },
-    expect: "After clicking the emailed link you see a page titled Sensors, with your email under it and no devices listed yet.",
+    expect: "A page titled Sensors, with your email under it and no devices listed yet.",
     stuck: [
-      {
-        problem: "The email has not arrived after a minute.",
-        fix: "Check spam. The sender is Supabase on behalf of SkyEar.",
-      },
-      {
-        problem: "The link opens an error page.",
-        fix: "Links expire and are single-use. Request a new one.",
-      },
+      { problem: "No email after a minute.", fix: "Check spam. It is sent by Supabase on behalf of SkyEar." },
+      { problem: "The link opens an error.", fix: "Links are single-use and expire. Request another." },
     ],
   },
   {
     where: "machine",
-    title: "Open a terminal on the machine with the camera",
-    body: "Everything from here runs on the computer that can reach your camera on the local network — your NAS over SSH, a Raspberry Pi, or a laptop on the same Wi-Fi. Not on a server somewhere, and not in your browser. This is the part people get wrong.",
-    code: "ping -c 3 192.168.1.50   # your camera's address",
-    expect: `64 bytes from 192.168.1.50: icmp_seq=0 ttl=64 time=3.1 ms
-64 bytes from 192.168.1.50: icmp_seq=1 ttl=64 time=2.8 ms
-3 packets transmitted, 3 packets received, 0.0% packet loss`,
-    stuck: [
-      {
-        problem: "Synology: you need SSH first.",
-        fix: "Control Panel → Terminal & SNMP → Enable SSH service, then ssh admin@your-nas from your own computer.",
-      },
-      {
-        problem: "The camera does not respond.",
-        fix: "Find its address in your router's device list, or in the camera's own app.",
-      },
-    ],
-  },
-  {
-    where: "machine",
-    title: "Install Docker if it is not already there",
-    body: "The agent ships as a container so you do not have to install Python or ffmpeg yourself.",
-    code: `# Synology: Package Center → install "Container Manager"
-# Raspberry Pi or Linux:
-curl -fsSL https://get.docker.com | sh
+    title: "Start the agent next to your camera",
+    body: "This runs on a machine that can reach your camera over the local network — a NAS, a Raspberry Pi, or any computer that stays on. It does not need to be powerful. It does need to stay awake, so a laptop is fine for trying it and poor for leaving it.",
+    code: `# Synology: Container Manager → Project → Create → paste this, then Build
+services:
+  skyear:
+    image: ghcr.io/mrunluckyy/skyear-agent:latest
+    container_name: skyear-agent
+    restart: unless-stopped
+    ports: ["8088:8088"]
+    volumes: ["./data:/data"]
 
-# Check it works
-docker --version`,
-    expect: "A version number, for example: Docker version 27.3.1",
-  },
-  {
-    where: "machine",
-    title: "Download the agent",
-    body: "One folder holds everything: the config, your camera password, and a compose file that pulls the published image.",
-    code: `git clone https://github.com/MrUnluckyy/skyear.git
-cd skyear/agent`,
-    expect: "Running ls shows docker-compose.yml, config.example.yaml and .env.example.",
-    stuck: [
-      {
-        problem: "git is not installed.",
-        fix: "Download the ZIP from the GitHub page instead and unpack it, then cd into skyear/agent.",
-      },
-    ],
-  },
-  {
-    where: "machine",
-    title: "Check your camera actually has a microphone",
-    body: "Most security cameras carry audio on the sub-stream, but not all of them, and it is worth knowing before you go further. Replace USER, PASSWORD and the address with yours.",
-    code: `docker run --rm linuxserver/ffmpeg:latest \\
-  -v error -rtsp_transport tcp \\
-  -i "rtsp://USER:PASSWORD@192.168.1.50:554/Preview_01_sub" \\
-  -t 1 -f null -`,
-    expect: "No error. If the camera has no audio track, the next step's --check will say so plainly.",
-    stuck: [
-      {
-        problem: "401 Unauthorized.",
-        fix: "Wrong username or password. Reolink cameras often use admin with the password you set in the app.",
-      },
-      {
-        problem: "Connection refused or timeout.",
-        fix: "RTSP may be disabled on the camera. Enable it in the camera's settings, usually under Network → Advanced.",
-      },
-    ],
-  },
-  {
-    where: "machine",
-    title: "Fill in your camera and where it is",
-    body: "Copy the two template files and edit them. The position matters more than it looks: every distance and sound-delay figure is measured from it, so a few hundred metres of error shows up in all of them.",
-    code: `cp config.example.yaml config.yaml
-cp .env.example .env
-nano config.yaml`,
-    expect: `Set these, then save with Ctrl+O and exit with Ctrl+X:
+# Or, on any machine with a terminal, one command and no files:
+docker run -d --name skyear --restart unless-stopped \\
+  -p 8088:8088 -v skyear-data:/data \\
+  ghcr.io/mrunluckyy/skyear-agent:latest`,
+    expect: `The container starts and its log says:
 
-  host: 192.168.1.50      your camera's address
-  username: admin
-  lat: 54.6872            where the camera physically is
-  lon: 25.2797            right-click the spot in Google Maps to copy them
-  elevation_m: 210        ground height above sea level there
-  mount_height_m: 4       how far above the ground it is mounted
+  setup page: http://192.168.1.144:8088
+  no camera configured yet - open the setup page above to add one
 
-Then put the camera password in .env:  nano .env`,
+That is expected. Nothing is configured yet.`,
     stuck: [
-      {
-        problem: "Which stream type do I pick?",
-        fix: "reolink, hikvision, dahua and ubiquiti are handled directly. Anything else: set url_env and supply the whole URL.",
-      },
-    ],
-  },
-  {
-    where: "machine",
-    title: "Test before committing to it",
-    body: "One command checks both halves: that the camera audio is reachable, and that live aircraft positions are arriving. It prints what it found and exits.",
-    code: "docker compose run --rm skyear --check",
-    expect: `[home-1] OK audio: stream|codec_name=aac|codec_type=audio|sample_rate=16000
-[adsb] OK 6 aircraft within 15 nm
-   BTI3TP    BCS3  alt   1067 m`,
-    stuck: [
-      {
-        problem: "CAM1_PASSWORD is not set.",
-        fix: "The password is missing from .env. Open it and set CAM1_PASSWORD=yourpassword.",
-      },
-      {
-        problem: "FAIL with 401.",
-        fix: "The password in .env is wrong. The agent never prints it back, so check the file directly.",
-      },
-      {
-        problem: "adsb FAIL.",
-        fix: "Usually a rate limit. Wait a minute and run it again.",
-      },
+      { problem: "No Docker on the machine.", fix: "Synology: install Container Manager from Package Center. Linux or Raspberry Pi: curl -fsSL https://get.docker.com | sh" },
+      { problem: "Port 8088 already used.", fix: "Change the first number, for example 9088:8088, and use that port below." },
     ],
   },
   {
     where: "browser",
-    title: "Generate a pairing code",
-    body: "Press Generate pairing code on your sensors page. A short code appears, with the exact command to run beneath it, your code already filled in.",
-    link: { href: "/devices", label: "Open your sensors page" },
-    expect: "An eight-character code such as K4M7PQR2, valid for 15 minutes and usable once.",
-  },
-  {
-    where: "machine",
-    title: "Pair the agent with your account",
-    body: "Run this once, with your code. It links this machine to your account and stores a token that you can revoke at any time.",
-    code: "docker compose run --rm skyear --pair K4M7PQR2",
-    expect: `OK paired as device 1ecdcb15-fae1-4053-aed6-b380c3bea6e1
-   cameras: home-1
-   token stored in /data/device.json (never commit it)`,
+    title: "Open the setup page and fill in one form",
+    body: "Go to that machine's address with :8088 on the end — on a Synology, the same address you use for DSM. Everything else happens on one screen: pick your camera make, enter its address and password, press Test, set the position, and paste the pairing code from step one.",
+    code: "http://YOUR-MACHINE-ADDRESS:8088",
+    expect: `Test this camera reports something like:
+
+  Audio found — aac at 16000 Hz. This camera can be a sensor.
+
+Use my current location fills in the position, and the ground elevation is
+looked up for you. Then Save and connect.`,
     stuck: [
-      {
-        problem: "code invalid, expired, or already used.",
-        fix: "Codes last 15 minutes and work once. Generate a fresh one.",
-      },
-      {
-        problem: "already paired.",
-        fix: "Delete data/device.json and pair again.",
-      },
+      { problem: "\u201cThe camera rejected that username or password.\u201d", fix: "Reolink usually wants admin and the password you set in its app." },
+      { problem: "\u201cCould not reach the camera.\u201d", fix: "Check the address, and that RTSP is switched on in the camera settings." },
+      { problem: "\u201cThis camera streams video but no audio.\u201d", fix: "Some models have no microphone. That one cannot be a sensor." },
+      { problem: "The page does not load at all.", fix: "The agent log prints the exact address to use. In Docker it may print the container address instead, so use the machine's own." },
     ],
   },
   {
-    where: "machine",
-    title: "Leave it running",
-    body: "Start the agent in the background. It restarts on its own if the machine reboots.",
-    code: `docker compose up -d
-docker logs -f skyear-agent`,
-    expect: `SkyEar agent running with 1 camera(s)
-audio flowing from rtsp://***@192.168.1.50:554/Preview_01_sub
-[home-1] alive, noise floor -20.9 dB
-[home-1] PASS BTI3TP BCS3 closest 6.7 km alt 587 m -> not heard
-
-Press Ctrl+C to stop watching the log. That does not stop the agent.`,
-  },
-  {
     where: "browser",
-    title: "Confirm it arrived",
-    body: "Open the map. Within about a minute your sensor appears with rings collapsing into it, and the panel starts counting passes.",
+    title: "Watch it start listening",
+    body: "Restart the container so it picks up the camera, then open the map. Your sensor appears with wavefronts collapsing into it, and starts recording every aircraft that passes — heard or not.",
     link: { href: "/", label: "Open the map" },
-    expect: "A dot where your camera is, labelled listening, and a rising count of aircraft under it.",
+    expect: "A dot where your camera is, labelled listening, and a rising count of aircraft. The level meter on the setup page moves whenever there is sound.",
     stuck: [
-      {
-        problem: "The sensor does not appear.",
-        fix: "The agent uploads every 30 seconds and only after it has recorded something. Give it a few minutes near an airport, longer elsewhere.",
-      },
+      { problem: "The sensor does not appear.", fix: "The agent uploads every 10 seconds but only once it has something to say. Near an airport give it a few minutes; elsewhere longer." },
     ],
   },
 ];
@@ -316,7 +202,7 @@ export default function Join() {
             for drones.
           </p>
           <p className="mt-4 text-[13px] text-slate-dim">
-            About 30 minutes, most of it waiting for downloads.
+            About 15 minutes, most of it waiting for a download.
           </p>
         </header>
 
@@ -351,10 +237,10 @@ export default function Join() {
           <h2 className="text-[15px] text-bone">Before you start</h2>
           <ul className="mt-4 grid gap-x-8 gap-y-2 md:grid-cols-2">
             {[
-              "A camera with a microphone, reachable over RTSP",
-              "Its address, username and password",
-              "A machine on the same network that can run Docker",
-              "The camera's position and mounting height",
+              "A camera with a microphone, on your own network",
+              "Its address, and a username and password for it",
+              "A machine that stays on and can reach the camera — a NAS, a Pi, a spare computer",
+              "Roughly how high the camera is mounted",
             ].map((item) => (
               <li key={item} className="text-[14px] leading-relaxed text-slate">
                 {item}
@@ -365,62 +251,45 @@ export default function Join() {
 
         <section className="mt-16 border border-edge">
           <h2 className="border-b border-edge px-6 py-4 text-[15px] text-bone">
-            Find your camera&rsquo;s stream
+            What to have ready for your camera
           </h2>
 
           <div className="border-b border-edge p-6">
             <p className="text-[13px] text-frost">Reolink, Hikvision, Dahua</p>
             <p className="mt-2 max-w-[62ch] text-[13px] leading-relaxed text-slate">
-              Handled directly. Give the agent the camera&rsquo;s address, a username and a
-              password, and it builds the stream URL itself. Check RTSP is enabled on the camera,
-              usually under Network or Advanced.
+              Its address on your network, a username and a password. The setup page builds the
+              rest and tests it before you commit. Make sure RTSP is switched on in the camera
+              settings, usually under Network or Advanced.
             </p>
           </div>
 
-          {/* Genuinely different, and the difference trips people up. */}
           <div className="border-b border-edge p-6">
             <p className="text-[13px] text-sodium">Ubiquiti UniFi Protect</p>
             <p className="mt-2 max-w-[62ch] text-[13px] leading-relaxed text-slate">
-              Works unlike the rest, so it gets its own path. The stream comes from your{" "}
-              <strong className="font-normal text-bone">NVR or UDM</strong>, not the camera, over
-              RTSPS on port 7441 — and there is no username or password. A per-camera token in the
-              URL is the credential, which is why it goes in <code>.env</code> and never in{" "}
-              <code>config.yaml</code>.
+              Different from the rest, so the form asks for different things. The stream comes from
+              your <strong className="font-normal text-bone">NVR or UDM</strong>, not the camera,
+              and there is no username or password — a token in the URL is the credential.
             </p>
-            <ol className="mt-3 max-w-[62ch] space-y-1 text-[13px] leading-relaxed text-slate">
-              <li>
-                1. In UniFi Protect, open the camera → Settings → Advanced → enable{" "}
-                <strong className="font-normal text-bone">RTSP</strong> for one quality. Low or
-                Medium is plenty; the audio is the same on every quality.
-              </li>
-              <li>2. Copy the URL it shows you. It looks like the line below.</li>
-              <li>3. Take the token — the part after the last slash — and put that in .env.</li>
-            </ol>
+            <p className="mt-3 max-w-[62ch] text-[13px] leading-relaxed text-slate">
+              In Protect, open the camera → Settings → Advanced → enable{" "}
+              <strong className="font-normal text-bone">RTSP</strong> for any one quality. Copy the
+              URL it shows and keep the part after the last slash:
+            </p>
             <pre className="scroll-thin mt-3 overflow-x-auto border border-edge bg-night-deep p-4 font-mono text-[12.5px] leading-relaxed text-frost/90">
 {`rtsps://192.168.1.1:7441/aBcDeF123456?enableSrtp
-                         └──── this is the token ────┘
-
-# config.yaml
-  - id: gate
-    type: ubiquiti
-    host: 192.168.1.1          # the NVR, not the camera
-    password_env: CAM2_STREAM
-
-# .env
-CAM2_STREAM=aBcDeF123456`}
+                         └── paste this part ──┘`}
             </pre>
             <p className="mt-3 max-w-[62ch] text-[12px] leading-relaxed text-slate-dim">
-              Protect regenerates the token if you disable and re-enable RTSP, so the stream stops
-              until you paste the new one. The agent masks the token in its logs.
+              Protect issues a new token if you turn RTSP off and on again, which silently stops
+              the stream until you paste the new one.
             </p>
           </div>
 
           <div className="p-6">
-            <p className="text-[13px] text-frost">Anything else</p>
+            <p className="text-[13px] text-frost">Does it even have a microphone?</p>
             <p className="mt-2 max-w-[62ch] text-[13px] leading-relaxed text-slate">
-              If you can get a working RTSP URL out of the camera by any means, put the whole thing
-              in <code>.env</code> and point <code>url_env</code> at it. The agent will use it
-              verbatim.
+              Many cameras do not, and the box rarely says. You do not need to find out in advance —
+              the setup page tests the stream and tells you plainly whether there is audio on it.
             </p>
           </div>
         </section>
