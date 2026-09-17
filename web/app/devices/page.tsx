@@ -92,9 +92,14 @@ export default function Devices() {
             <h1 className="text-lg font-semibold tracking-tight">Sensors</h1>
             <p className="text-sm text-neutral-400">{email}</p>
           </div>
-          <a href="/" className="text-sm text-sky-400 underline">
-            Map
-          </a>
+          <nav className="flex gap-4 text-sm">
+            <a href="/join" className="text-slate hover:text-sodium">
+              Setup guide
+            </a>
+            <a href="/" className="text-slate hover:text-sodium">
+              Map
+            </a>
+          </nav>
         </header>
 
         <section className="rounded-xl border border-white/10 bg-neutral-900/70 p-5">

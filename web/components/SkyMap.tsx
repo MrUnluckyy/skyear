@@ -457,9 +457,12 @@ export default function SkyMap() {
           )}
         </div>
 
-        <footer className="border-t border-edge px-5 py-3">
+        <footer className="flex items-center justify-between border-t border-edge px-5 py-3">
           <a href="/devices" className="text-[12px] text-slate hover:text-sodium">
-            Manage sensors
+            Your sensors
+          </a>
+          <a href="/join" className="text-[12px] text-sodium hover:underline">
+            Become a sensor
           </a>
         </footer>
       </aside>
