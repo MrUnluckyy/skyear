@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Map as MapLibreMap, NavigationControl } from "maplibre-gl";
+import { Map as MapLibreMap, NavigationControl, setWorkerUrl } from "maplibre-gl";
 import type { GeoJSONSource } from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
 import { createClient } from "@/lib/supabase";
@@ -19,6 +19,16 @@ import {
 import { DetectionRow, OctaveBars, SensorBeacon } from "./SensorBeacon";
 
 /** Vilnius old town. A default centre should be a city, not a contributor's street. */
+/**
+ * v6 loads its worker as a separate ES module that does not resolve under
+ * Turbopack, and vector tiles are fetched *inside* that worker - so without
+ * this the style loads, layers attach, and no tile is ever requested, silently.
+ * v6 is required: every earlier release carries a critical XSS advisory
+ * (GHSA-jrc7-96c5-q579) in DOM.sanitize, which style-supplied attribution HTML
+ * passes through.
+ */
+setWorkerUrl("/maplibre-gl-worker.mjs");
+
 const VILNIUS: [number, number] = [25.2797, 54.6872];
 
 /**
