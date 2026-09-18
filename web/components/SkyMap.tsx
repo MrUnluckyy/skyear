@@ -12,6 +12,7 @@ import {
   conditionVerdict,
   fleetBaseline,
   fleetWindow,
+  poolTypes,
   sensorNames,
   sensorPhase,
   unaccountedBySensor,
@@ -357,6 +358,10 @@ export default function SkyMap() {
 
   const baseline = fleetBaseline(stats);
   const excluded = stats.reduce((n, s) => n + (s.excluded_passes_24h || 0), 0);
+  // public_type_stats is per sensor, so an airframe seen by two sensors
+  // appeared twice in this list with different figures - which reads as a bug
+  // and hides the pooled sample size that actually matters.
+  const pooledTypes = useMemo(() => poolTypes(types), [types]);
   const heardRate = total.passes ? total.heard / total.passes : null;
   const airborne = aircraft.filter((a) => a.alt_m > 0).length;
   const newest = detections[0] ?? null;
@@ -613,7 +618,7 @@ export default function SkyMap() {
             <section className="border-b border-edge px-5 py-4">
               <h2 className="text-[12px] text-slate">Heard by aircraft type</h2>
               <ul className="mt-3 space-y-2">
-                {types.slice(0, 7).map((t) => {
+                {pooledTypes.slice(0, 7).map((t) => {
                   const rate = t.passes ? t.heard / t.passes : 0;
                   return (
                     <li key={t.aircraft_type} className="grid grid-cols-[42px_1fr_auto] items-center gap-2">

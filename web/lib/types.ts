@@ -152,6 +152,30 @@ export function conditionVerdict(duty: number): {
   };
 }
 
+/** Per-type figures pooled across sensors, for the fleet-wide rail. */
+export function poolTypes(types: TypeStats[]): TypeStats[] {
+  const by = new Map<string, TypeStats>();
+  for (const t of types) {
+    const prev = by.get(t.aircraft_type);
+    if (!prev) {
+      by.set(t.aircraft_type, { ...t, sensor_id: "*" });
+      continue;
+    }
+    // Slant is averaged weighted by passes, not by sensor: a sensor with three
+    // passes should not move the mean as much as one with thirty.
+    const passes = prev.passes + t.passes;
+    by.set(t.aircraft_type, {
+      ...prev,
+      passes,
+      heard: prev.heard + t.heard,
+      avg_slant_m: Math.round(
+        (prev.avg_slant_m * prev.passes + t.avg_slant_m * t.passes) / Math.max(passes, 1)
+      ),
+    });
+  }
+  return [...by.values()].sort((a, b) => b.passes - a.passes);
+}
+
 export type TypeStats = {
   sensor_id: string;
   aircraft_type: string;

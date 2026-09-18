@@ -154,7 +154,16 @@ export function TiltScale({
 
       <p className="mt-2 text-[11px] leading-snug text-slate">
         {inside.length === 0
-          ? "This tilt falls outside every population recorded here so far."
+          ? (() => {
+              // Falling between two populations is the common case and says
+              // something; falling beyond all of them says something else.
+              const below = rows.filter((b) => tilt > b.p90);
+              const above = rows.filter((b) => tilt < b.p10);
+              if (below.length && above.length) {
+                return `That sits between ${POPULATION_LABEL[below[0].population].toLowerCase()} and ${POPULATION_LABEL[above[above.length - 1].population].toLowerCase()} — the measurement does not commit either way.`;
+              }
+              return "This tilt falls outside every population recorded here so far.";
+            })()
           : inside.length === 1
             ? `That puts it among ${POPULATION_LABEL[inside[0].population].toLowerCase()} sounds (${inside[0].n} recorded).`
             : `That range overlaps ${inside.map((b) => POPULATION_LABEL[b.population].toLowerCase()).join(" and ")}, so tilt alone does not decide it.`}{" "}
