@@ -151,6 +151,24 @@ class SetupHandler(BaseHTTPRequestHandler):
         query = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query).get("t", [""])[0]
         return want in (query, self._cookie_token())
 
+    def handle_one_request(self):
+        """Never let an exception kill the connection.
+
+        BaseHTTPRequestHandler drops the socket when a handler raises, which
+        reaches the caller as a bare 502 through Home Assistant's ingress proxy
+        and says nothing about what broke. Turning it into a JSON 500 with the
+        exception text means the setup page can show the real fault.
+        """
+        try:
+            super().handle_one_request()
+        except Exception as e:
+            log.exception("unhandled error serving %s", self.path)
+            try:
+                self._json({"error": f"The agent failed handling this request: "
+                                     f"{type(e).__name__}: {e}"}, 500)
+            except Exception:
+                pass
+
     # --- routes ----------------------------------------------------------
     def do_GET(self):
         """Reads are open; only changes need the token.
@@ -186,6 +204,13 @@ class SetupHandler(BaseHTTPRequestHandler):
         return self._json({"error": "not found"}, 404)
 
     def do_POST(self):
+        try:
+            self._post()
+        except Exception as e:
+            log.exception("error in %s", self.path)
+            self._json({"error": f"{type(e).__name__}: {e}"}, 500)
+
+    def _post(self):
         route = urllib.parse.urlparse(self.path).path
         if not self._authorised():
             return self._json({
