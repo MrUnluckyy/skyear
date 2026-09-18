@@ -4,6 +4,7 @@ import { useState } from "react";
 import {
   OCTAVES,
   ago,
+  conditionVerdict,
   isUnaccounted,
   matchConfidence,
   noiseBaseline,
@@ -11,11 +12,12 @@ import {
   verdict,
   type PublicDetection,
   type PublicSensor,
+  type SensorConditions,
   type SensorStats,
   type SpectrumBaseline,
   type TypeStats,
 } from "@/lib/types";
-import { PeriodicityNote, SoundFacts, SoundProfile, TiltScale } from "./SoundProfile";
+import { PeriodicityNote, RotorSignature, SoundFacts, SoundProfile, TiltScale } from "./SoundProfile";
 
 /**
  * Six octave levels as a fingerprint.
@@ -101,6 +103,56 @@ function Health({ sensor, stats }: { sensor: PublicSensor; stats?: SensorStats }
   );
 }
 
+/**
+ * What this ear is sitting in right now.
+ *
+ * Placed with the health readings rather than the statistics, because it is a
+ * statement about the sensor's present situation, not about its record. A
+ * detection from a saturated ear is not worth the same as one from a quiet ear,
+ * and nothing else on the page says so.
+ */
+function Conditions({
+  sensorId,
+  conditions,
+}: {
+  sensorId: string;
+  conditions: SensorConditions[];
+}) {
+  const hour = conditions.find((c) => c.sensor_id === sensorId && c.window_min === 60);
+  const quarter = conditions.find((c) => c.sensor_id === sensorId && c.window_min === 15);
+  if (!hour) return null;
+  const v = conditionVerdict(hour.duty);
+  const tone = v.tone === "bad" ? "var(--bad)" : v.tone === "fair" ? "var(--sodium)" : "var(--signal)";
+
+  return (
+    <div className="mt-3 border-t border-edge/60 pt-3">
+      <div className="flex items-baseline justify-between">
+        <span className="text-[12px] text-slate-dim">Conditions</span>
+        <span className="text-[12px]" style={{ color: tone }}>
+          {v.label}
+        </span>
+      </div>
+      <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-haze">
+        <div
+          className="h-full rounded-full"
+          style={{ width: `${Math.round(hour.duty * 100)}%`, background: tone }}
+        />
+      </div>
+      <p className="mt-1.5 font-mono text-[10.5px] text-slate-dim">
+        sound present {Math.round(hour.duty * 100)}% of the last hour
+        {quarter && ` · ${Math.round(quarter.duty * 100)}% of the last 15 min`}
+      </p>
+      {hour.truncated > 0 && (
+        <p className="mt-1 text-[11px] leading-snug text-slate-dim">
+          {hour.truncated} of those ran past the {""}
+          {Math.round(240 / 60)}-minute event limit, so they are slices of something continuous
+          rather than separate sounds.
+        </p>
+      )}
+    </div>
+  );
+}
+
 /** What this ear has proven it can hear, from its own pass record. */
 function MeasuredRange({ types }: { types: TypeStats[] }) {
   const shown = types.filter((t) => t.passes >= 3).slice(0, 6);
@@ -180,6 +232,7 @@ function DetectionLine({ d, spectrum }: { d: PublicDetection; spectrum: Spectrum
             <p className="text-[11px] text-slate-dim">No spectrum was stored for this one.</p>
           )}
           <TiltScale detection={d} baseline={spectrum} />
+          <RotorSignature detection={d} />
           <SoundFacts detection={d} />
           <PeriodicityNote detection={d} />
           {isUnaccounted(d) && (
@@ -199,6 +252,7 @@ export default function SensorPanel({
   sensor,
   names,
   spectrum,
+  conditions,
   stats,
   types,
   detections,
@@ -211,6 +265,8 @@ export default function SensorPanel({
   names: Record<string, string>;
   /** Measured tilt distributions, for placing one sound among the rest. */
   spectrum: SpectrumBaseline[];
+  /** Live duty cycle per sensor, in 15 and 60 minute windows. */
+  conditions: SensorConditions[];
   stats?: SensorStats;
   types: TypeStats[];
   detections: PublicDetection[];
@@ -289,6 +345,7 @@ export default function SensorPanel({
       <div className="scroll-thin flex-1 overflow-y-auto">
         <section className="border-b border-edge px-5 py-4">
           <Health sensor={sensor} stats={stats} />
+          <Conditions sensorId={sensor.id} conditions={conditions} />
         </section>
 
         {/* The drone case: sound nobody can account for. */}
@@ -303,6 +360,13 @@ export default function SensorPanel({
             A drone broadcasts nothing, so a sound with no aircraft overhead is the thing worth
             looking at. Wind is filtered out before it reaches this list.
           </p>
+          {(stats?.excluded_passes_24h ?? 0) > 0 && (
+            <p className="mt-2 text-[11px] leading-snug text-slate-dim">
+              <span className="font-mono text-noise">{stats?.excluded_passes_24h}</span> passes are
+              held out of these figures — the agent&rsquo;s clock had drifted and matching was
+              inoperative, so a &ldquo;not heard&rdquo; from that window proves nothing.
+            </p>
+          )}
           {baseline !== null && rate !== null && (
             <p className="mt-2 text-[11px] leading-snug text-slate-dim">
               This sensor heard{" "}

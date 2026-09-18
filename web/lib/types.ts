@@ -75,6 +75,16 @@ export type PublicDetection = {
   /** The sound repeats, the way an engine does and wind does not. */
   harmonic: boolean;
   octave_db: Record<string, number> | null;
+  /** The event hit the detector's length cap, so it is a slice, not a sound. */
+  truncated: boolean;
+  /** Prominence of the best harmonic spacing, dB. 0 means no regular structure. */
+  comb_db: number | null;
+  /** The spacing itself: a candidate blade-pass or engine firing rate. */
+  comb_f0_hz: number | null;
+  /** How many multiples of that spacing carry a resolvable tone. */
+  n_harmonics: number | null;
+  /** How much of the band sits in narrow peaks rather than broadband. */
+  tonal_db: number | null;
   match_flight: string | null;
   match_type: string | null;
   match_slant_m: number | null;
@@ -94,7 +104,53 @@ export type SensorStats = {
   observed_seconds: number;
   last_detection_at: string | null;
   avg_floor_db: number | null;
+  /** Passes in the window that cannot support a conclusion, and were dropped. */
+  excluded_passes_24h: number;
 };
+
+/**
+ * Conditions right now, per sensor.
+ *
+ * The 24 h duty cycle hides the thing a viewer most needs to know: whether the
+ * map is currently measuring anything or just watching noise. On a windy
+ * afternoon both sensors sat near 60% - six passes in ten would coincide with a
+ * sound by chance - while the 24 h figure still read 19%.
+ */
+export type SensorConditions = {
+  sensor_id: string;
+  window_min: number;
+  events: number;
+  truncated: number;
+  /** Share of the window with a sound in progress, 0-1. */
+  duty: number;
+};
+
+/** How much a detection is worth right now, given what else is going on. */
+export function conditionVerdict(duty: number): {
+  label: string;
+  note: string;
+  tone: "good" | "fair" | "bad";
+} {
+  if (duty >= 0.5) {
+    return {
+      label: "saturated",
+      note: "A sound is present most of the time, so most passes coincide with one by chance. Detections now mean very little.",
+      tone: "bad",
+    };
+  }
+  if (duty >= 0.25) {
+    return {
+      label: "noisy",
+      note: "Background sound is frequent enough that a fair share of matches are coincidence.",
+      tone: "fair",
+    };
+  }
+  return {
+    label: "quiet",
+    note: "Background is quiet enough that a match is more likely to mean something.",
+    tone: "good",
+  };
+}
 
 export type TypeStats = {
   sensor_id: string;
@@ -227,7 +283,10 @@ export function sensorName(s: PublicSensor, index: number): string {
  * Wind never reaches here; the agent tags it and the public view drops it.
  */
 export function isUnaccounted(d: PublicDetection, minSeconds = 20): boolean {
-  return !d.match_flight && d.duration_s >= minSeconds;
+  // A truncated event is a slice of something that did not stop - a road, a
+  // generator, rain on a roof. Counting each slice as its own unexplained sound
+  // turned one continuous noise into nine separate "findings".
+  return !d.match_flight && !d.truncated && d.duration_s >= minSeconds;
 }
 
 /**
@@ -294,4 +353,57 @@ export function unaccountedBySensor(
     out[d.sensor_id] = (out[d.sensor_id] ?? 0) + 1;
   }
   return out;
+}
+
+
+/**
+ * Whether a sound has the narrowband structure of a turning rotor.
+ *
+ * Measured, on corrected synthesis at 0 dB SNR: this separates rotor sources
+ * from wind, road noise and jets at AUC 1.000, and separates a drone from a
+ * SCOOTER at AUC 0.500 - which is to say, not at all. Both are small engines
+ * turning something in the same frequency range, and one microphone cannot
+ * tell them apart on spectrum. That is a fact about physics, not a gap in the
+ * implementation.
+ *
+ * So this returns "has a rotor" and never "is a drone". The step from one to
+ * the other needs geometry - altitude, motion, and several sensors hearing the
+ * same thing at once - and until that exists nothing here may turn red.
+ */
+export type RotorReading = {
+  present: boolean;
+  /** 0-1, how clearly the comb stands out. NOT a probability of a drone. */
+  strength: number;
+  label: string;
+  note: string;
+};
+
+/** Harmonics needed before a comb is worth mentioning at all. */
+export const ROTOR_MIN_HARMONICS = 4;
+
+export function rotorReading(d: PublicDetection): RotorReading | null {
+  if (d.n_harmonics == null || d.comb_db == null) return null;
+  const n = d.n_harmonics;
+  const f0 = d.comb_f0_hz ?? 0;
+
+  if (n < ROTOR_MIN_HARMONICS) {
+    return {
+      present: false,
+      strength: 0,
+      label: "no rotor signature",
+      note: "No regular harmonic stack. Wind, road noise and jet aircraft all look like this.",
+    };
+  }
+  // Saturating rather than linear: the difference between four harmonics and
+  // eight is large, between twelve and sixteen it is not.
+  const strength = Math.min(1, (n - ROTOR_MIN_HARMONICS) / 8 + Math.min(d.comb_db, 12) / 24);
+  return {
+    present: true,
+    strength,
+    label: `rotor signature · ${n} harmonics`,
+    note:
+      f0 > 0
+        ? `Something is turning at about ${f0.toFixed(0)} Hz. A propeller, an engine, or a scooter — this measurement does not separate them.`
+        : "A regular harmonic stack, the mark of something turning.",
+  };
 }

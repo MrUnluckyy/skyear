@@ -9,6 +9,7 @@ import {
   PHASE_LABEL,
   PHASE_RANK,
   verdict,
+  conditionVerdict,
   fleetBaseline,
   fleetWindow,
   sensorNames,
@@ -17,13 +18,14 @@ import {
   type Aircraft,
   type PublicDetection,
   type PublicSensor,
+  type SensorConditions,
   type SensorStats,
   type SpectrumBaseline,
   type TypeStats,
 } from "@/lib/types";
 import { DetectionRow, OctaveBars, SensorBeacon } from "./SensorBeacon";
 import SensorPanel from "./SensorPanel";
-import { PeriodicityNote, SoundProfile, TiltScale } from "./SoundProfile";
+import { PeriodicityNote, RotorSignature, SoundProfile, TiltScale } from "./SoundProfile";
 
 /** Vilnius old town. A default centre should be a city, not a contributor's street. */
 /**
@@ -87,6 +89,7 @@ export default function SkyMap() {
   const [stats, setStats] = useState<SensorStats[]>([]);
   const [types, setTypes] = useState<TypeStats[]>([]);
   const [spectrum, setSpectrum] = useState<SpectrumBaseline[]>([]);
+  const [conditions, setConditions] = useState<SensorConditions[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [selected, setSelected] = useState<string | null>(null);
   // On a phone the rail is a sheet that starts closed, so the map - the thing
@@ -281,7 +284,7 @@ export default function SkyMap() {
     let alive = true;
 
     const load = async () => {
-      const [s, d, st, ty, sb] = await Promise.all([
+      const [s, d, st, ty, sb, co] = await Promise.all([
         // Ordered, always. The numbering people see is positional, so an
         // unordered result renames every sensor between polls.
         supabase.from("public_sensors").select("*").order("id"),
@@ -289,6 +292,7 @@ export default function SkyMap() {
         supabase.from("public_sensor_stats").select("*"),
         supabase.from("public_type_stats").select("*").order("passes", { ascending: false }),
         supabase.from("public_spectrum_baseline").select("*"),
+        supabase.from("public_sensor_conditions").select("*"),
       ]);
       if (!alive) return;
       setError(s.error ? s.error.message : null);
@@ -296,6 +300,7 @@ export default function SkyMap() {
       setStats((st.data as SensorStats[]) ?? []);
       setTypes((ty.data as TypeStats[]) ?? []);
       setSpectrum((sb.data as SpectrumBaseline[]) ?? []);
+      setConditions((co.data as SensorConditions[]) ?? []);
 
       const rows = (d.data as PublicDetection[]) ?? [];
       setDetections(rows);
@@ -351,6 +356,7 @@ export default function SkyMap() {
   );
 
   const baseline = fleetBaseline(stats);
+  const excluded = stats.reduce((n, s) => n + (s.excluded_passes_24h || 0), 0);
   const heardRate = total.passes ? total.heard / total.passes : null;
   const airborne = aircraft.filter((a) => a.alt_m > 0).length;
   const newest = detections[0] ?? null;
@@ -391,6 +397,19 @@ export default function SkyMap() {
    * later; an owner who named it expects to see that name here.
    */
   const names = useMemo(() => sensorNames(sensors), [sensors]);
+
+  /*
+   * Conditions now, taken as the busiest sensor over the last hour. The worst
+   * one governs: if any ear is swamped, a detection from it is coincidence, and
+   * a headline that averaged that away would be hiding the caveat rather than
+   * showing it.
+   */
+  const liveDuty = useMemo(() => {
+    const online = new Set(sensors.filter((s) => s.online).map((s) => s.id));
+    const hour = conditions.filter((c) => c.window_min === 60 && online.has(c.sensor_id));
+    if (!hour.length) return null;
+    return Math.max(...hour.map((c) => c.duty));
+  }, [conditions, sensors]);
   const recentUnaccounted = useMemo(() => unaccountedBySensor(detections), [detections]);
 
   const online = sensors.filter((s) => s.online).length;
@@ -533,6 +552,35 @@ export default function SkyMap() {
             <p className="mt-1 font-mono text-[11px] text-slate-dim">
               {total.heard}/{total.passes} aircraft · {fleetWindow(stats)}
             </p>
+            {excluded > 0 && (
+              <p className="mt-1.5 text-[11px] leading-snug text-slate-dim">
+                <span className="font-mono text-noise">{excluded}</span> further passes are held out:
+                the agent&rsquo;s clock had drifted, so matching was inoperative and a
+                &ldquo;not heard&rdquo; from that window is not evidence of anything.
+              </p>
+            )}
+
+            {/*
+              Conditions right now. Placed directly under the headline because
+              it decides what the headline is worth: at 60% duty most passes
+              coincide with a sound whatever the sensors do.
+            */}
+            {liveDuty !== null && (() => {
+              const v = conditionVerdict(liveDuty);
+              const tone =
+                v.tone === "bad" ? "var(--bad)" : v.tone === "fair" ? "var(--sodium)" : "var(--signal)";
+              return (
+                <div className="mt-3 border-l-2 pl-3" style={{ borderColor: tone }}>
+                  <p className="text-[12px]">
+                    <span style={{ color: tone }}>Right now: {v.label}</span>
+                    <span className="ml-1.5 font-mono text-[11px] text-slate-dim">
+                      sound present {Math.round(liveDuty * 100)}% of the last hour
+                    </span>
+                  </p>
+                  <p className="mt-1 text-[11px] leading-snug text-slate-dim">{v.note}</p>
+                </div>
+              );
+            })()}
 
             {/* A heard rate has to beat the noise it is swimming in. */}
             {baseline !== null && (
@@ -637,6 +685,9 @@ export default function SkyMap() {
             railOpen ? "" : "hidden md:flex"
           }`}
         >
+          <a href="/reading" className="text-[12px] text-slate hover:text-sodium">
+            How to read this
+          </a>
           <a href="/devices" className="text-[12px] text-slate hover:text-sodium">
             Your sensors
           </a>
@@ -651,6 +702,7 @@ export default function SkyMap() {
           sensor={selectedSensor}
           names={names}
           spectrum={spectrum}
+          conditions={conditions}
           stats={stats.find((x) => x.sensor_id === selectedSensor.id)}
           types={types}
           detections={detections}
@@ -696,6 +748,7 @@ export default function SkyMap() {
             <div className="space-y-3 border-b border-edge px-4 py-3">
               <SoundProfile detection={newest} />
               <TiltScale detection={newest} baseline={spectrum} />
+              <RotorSignature detection={newest} />
               <PeriodicityNote detection={newest} />
             </div>
           )}

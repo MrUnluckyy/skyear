@@ -9,6 +9,8 @@ import math
 
 import numpy as np
 
+from .rotor import comb
+
 OCTAVES = [(50, 100), (100, 200), (200, 400), (400, 800), (800, 1600), (1600, 3200)]
 
 # Periodicity, measured by cepstral peak prominence.
@@ -38,7 +40,7 @@ class BandEnergyDetector:
     def __init__(self, sr=16000, frame_s=0.5, band_hz=(50, 2000), threshold_db=8.0,
                  release_db=4.0, min_duration_s=4.0, release_s=3.0, max_event_s=240.0,
                  floor_window_s=180.0, floor_percentile=20.0, warmup_s=30.0,
-                 wind_tilt_db=20.0, harmonic_cpp_db=0.12):
+                 wind_tilt_db=20.0, harmonic_cpp_db=0.12, comb_max_s=60.0):
         self.sr = sr
         self.n = int(sr * frame_s)
         self.frame_s = self.n / sr
@@ -56,6 +58,18 @@ class BandEnergyDetector:
         self.warmup_frames = int(warmup_s / self.frame_s)
         self.wind_tilt_db = wind_tilt_db
         self.harmonic_cpp_db = harmonic_cpp_db
+        # The rotor comb integrates over the whole event rather than per frame,
+        # so it needs the audio itself. Capped because a 240 s event at 16 kHz
+        # is 15 MB and this runs on a Raspberry Pi; 60 s already buys ~230
+        # Welch averages, and the gain past that is under a dB.
+        self.comb_max_samples = int(comb_max_s * sr)
+        self.ev_pcm: list = []
+        self.ev_samples = 0
+        # Audio for frames that have crossed the threshold but not yet lasted
+        # long enough to be an event. Carried into the event when one opens -
+        # without it the first min_duration_s of every sound is missing from the
+        # rotor analysis, which for a short event is most of it.
+        self.cand_pcm: list = []
         # Quefrency bounds for a plausible engine fundamental.
         self.q_lo = max(2, int(sr / F0_MAX_HZ))
         self.q_hi = min(self.n // 2, int(sr / F0_MIN_HZ))
@@ -150,25 +164,41 @@ class BandEnergyDetector:
         if self.active is None:
             if self.seen > self.warmup_frames and db > floor + self.thr:
                 self.cand.append(fr)
+                self.cand_pcm.append(x)
                 if len(self.cand) >= self.min_frames:
                     self.active, self.cand, self.below = self.cand, [], 0
                     self.event_floor = floor
+                    self.ev_pcm = self.cand_pcm
+                    self.ev_samples = sum(len(c) for c in self.ev_pcm)
+                    self.cand_pcm = []
             else:
                 for c in self.cand:
                     self.hist.append(c[1])
                 self.cand = []
+                self.cand_pcm = []
                 self.hist.append(db)
             return None
 
         self.active.append(fr)
+        if self.ev_samples < self.comb_max_samples:
+            self.ev_pcm.append(x)
+            self.ev_samples += len(x)
         self.below = self.below + 1 if db < self.event_floor + self.rel else 0
         if self.below >= self.release_frames or len(self.active) >= self.max_frames:
+            # Hitting the cap means the sound did not stop, we did. That has to
+            # travel with the event: a continuous noise source otherwise arrives
+            # as a run of separate "unexplained sounds", each counted once, and
+            # inflates both the event count and the duty cycle.
+            truncated = len(self.active) >= self.max_frames
             frames = self.active[: -self.below] if 0 < self.below < len(self.active) else self.active
+            pcm = np.concatenate(self.ev_pcm) if self.ev_pcm else np.zeros(0, dtype=np.float32)
             self.active = None
-            return self._summarise(frames)
+            self.ev_pcm = []
+            self.ev_samples = 0
+            return self._summarise(frames, pcm, truncated=truncated)
         return None
 
-    def _summarise(self, frames):
+    def _summarise(self, frames, pcm=None, truncated=False):
         ts = np.array([f[0] for f in frames])
         dbs = np.array([f[1] for f in frames])
         pk = int(np.argmax(dbs))
@@ -187,6 +217,14 @@ class BandEnergyDetector:
         # F0 is only meaningful where the frame was actually periodic.
         strong = cpps >= self.harmonic_cpp_db
         f0 = float(np.median([f[5] for f, ok in zip(frames, strong) if ok])) if strong.any() else 0.0
+
+        rotor = (comb(pcm, self.sr) if pcm is not None and len(pcm)
+                 else {"comb_db": 0.0, "f0_hz": 0.0, "n_harmonics": 0, "tonal_db": 0.0})
+        # rotor.f0_hz is a spacing measured across the whole event and is the
+        # better estimate; keep the cepstral one under its own name rather than
+        # letting two different quantities share a key.
+        rotor = {"comb_db": rotor["comb_db"], "comb_f0_hz": rotor["f0_hz"],
+                 "n_harmonics": rotor["n_harmonics"], "tonal_db": rotor["tonal_db"]}
 
         return {
             "start": float(ts[0]),
@@ -207,4 +245,11 @@ class BandEnergyDetector:
             # low-tilt because the atmosphere absorbs its high frequencies -
             # which is exactly how a real B738 pass got thrown away as wind.
             "likely_wind": bool(tilt >= self.wind_tilt_db and not harmonic),
+            # A slice of something longer, not a whole sound.
+            "truncated": bool(truncated),
+            # Narrowband rotor structure, integrated over the whole event. This
+            # is the feature that can see a propeller; the octave bands cannot,
+            # and cpp_db does not survive the trip through real air. See
+            # rotor.py for why, and for what it still cannot tell apart.
+            **rotor,
         }

@@ -114,6 +114,18 @@ Deno.serve(async (req) => {
       harmonic: Boolean(e.harmonic),
       f0_hz: num(e.f0_hz),
       likely_wind: Boolean(e.likely_wind),
+      // The agent knows its own max_event_s; the server must not guess it from
+      // a hard-coded duration. Absent on older agents, which is what the
+      // backfill in migration 0012 covers.
+      truncated: Boolean(e.truncated),
+      // Narrowband rotor structure. Stored for every event including noise: a
+      // labelled record of what the wind and the road sound like here is what
+      // any future classifier needs as negatives, and what the threshold for a
+      // red dot will eventually have to be set against.
+      comb_db: num(e.comb_db),
+      comb_f0_hz: num(e.comb_f0_hz),
+      n_harmonics: num(e.n_harmonics),
+      tonal_db: num(e.tonal_db),
       octave_db: e.octave_db ?? null,
       match_hex: best ? String(best.hex ?? "") || null : null,
       match_flight: best ? (best.flight as string | null) ?? null : null,

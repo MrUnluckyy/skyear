@@ -5,6 +5,7 @@ import {
   POPULATION_LABEL,
   matchConfidence,
   octaveShape,
+  rotorReading,
   type PublicDetection,
   type SpectrumBaseline,
 } from "@/lib/types";
@@ -209,5 +210,46 @@ export function PeriodicityNote({ detection: d }: { detection: PublicDetection }
       not yet meaningful: wind and confirmed propeller aircraft both average about 0.07 here, so
       this number does not separate them.
     </p>
+  );
+}
+
+
+/**
+ * Is something turning?
+ *
+ * Deliberately two states and no percentage. A number like "87% drone" would be
+ * invented: the feature behind this separates rotors from wind, road noise and
+ * jets perfectly, and drones from scooters not at all. Printing a confidence
+ * would claim a distinction the measurement cannot make, and a red dot on a
+ * map is exactly the place where that claim would do damage.
+ */
+export function RotorSignature({ detection }: { detection: PublicDetection }) {
+  const r = rotorReading(detection);
+  if (!r) return null;
+
+  return (
+    <div>
+      <div className="flex items-baseline justify-between gap-2">
+        <span className="text-[11px] text-slate-dim">Rotor</span>
+        <span className={`text-[11.5px] ${r.present ? "text-sodium" : "text-slate"}`}>
+          {r.label}
+        </span>
+      </div>
+      {r.present && (
+        <div className="mt-1.5 h-1 overflow-hidden rounded-full bg-haze">
+          <div
+            className="h-full rounded-full"
+            style={{ width: `${Math.round(r.strength * 100)}%`, background: "var(--sodium)" }}
+          />
+        </div>
+      )}
+      <p className="mt-1.5 text-[11px] leading-snug text-slate-dim">{r.note}</p>
+      {r.present && (
+        <p className="mt-1 text-[11px] leading-snug text-slate-dim">
+          This is not a drone detection. Telling a drone from a scooter needs altitude and more
+          than one sensor hearing it at once — neither of which SkyEar can do yet.
+        </p>
+      )}
+    </div>
   );
 }
