@@ -186,8 +186,11 @@ export default function SensorPanel({
   const rate = stats?.passes_24h ? stats.heard_24h / stats.passes_24h : null;
 
   return (
-    <aside className="absolute inset-y-0 right-0 z-20 flex w-[368px] max-w-[92vw] flex-col border-l border-edge bg-night/95 backdrop-blur-xl">
-      <header className="flex items-start justify-between border-b border-edge px-5 py-4">
+    <aside className="absolute inset-x-0 bottom-0 z-20 flex max-h-[72dvh] flex-col border-t border-edge bg-night/95 backdrop-blur-xl md:inset-x-auto md:inset-y-0 md:right-0 md:max-h-none md:w-[368px] md:border-l md:border-t-0">
+      <div className="flex justify-center pt-2 md:hidden" aria-hidden>
+        <span className="h-1 w-9 rounded-full bg-edge" />
+      </div>
+      <header className="flex items-start justify-between border-b border-edge px-5 py-3 md:py-4">
         <div>
           <h2 className="text-[15px] text-bone">Sensor</h2>
           <p className="mt-0.5 font-mono text-[11px] text-slate-dim">

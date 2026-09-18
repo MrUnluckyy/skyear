@@ -84,6 +84,9 @@ export default function SkyMap() {
   const [types, setTypes] = useState<TypeStats[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [selected, setSelected] = useState<string | null>(null);
+  // On a phone the rail is a sheet that starts closed, so the map - the thing
+  // people came for - is not buried under two panels of statistics.
+  const [railOpen, setRailOpen] = useState(false);
 
   // Screen positions for the DOM overlay, reprojected as the map moves.
   const [points, setPoints] = useState<Record<string, { x: number; y: number }>>({});
@@ -147,7 +150,11 @@ export default function SkyMap() {
       zoom: 10.2,
       attributionControl: { compact: true },
     });
-    m.addControl(new NavigationControl({ showCompass: false }), "top-right");
+    // Zoom buttons only where there is room for them. Touch devices pinch, and
+    // on a phone the controls would sit under the rail anyway.
+    if (window.innerWidth >= 768) {
+      m.addControl(new NavigationControl({ showCompass: false }), "top-right");
+    }
 
     m.on("error", (e) => {
       const msg = (e as unknown as { error?: { message?: string } }).error?.message ?? String(e);
@@ -202,12 +209,21 @@ export default function SkyMap() {
     }
     const lons = sensors.map((s) => s.lon);
     const lats = sensors.map((s) => s.lat);
+    // Panels sit beside the map on a desktop and over it on a phone, so the
+    // room to leave differs entirely.
+    const wide = window.innerWidth >= 768;
     m.fitBounds(
       [
         [Math.min(...lons), Math.min(...lats)],
         [Math.max(...lons), Math.max(...lats)],
       ],
-      { padding: { top: 80, bottom: 80, left: 360, right: 380 }, maxZoom: 11, duration: 900 }
+      {
+        padding: wide
+          ? { top: 80, bottom: 80, left: 360, right: 380 }
+          : { top: 96, bottom: 220, left: 32, right: 32 },
+        maxZoom: 11,
+        duration: 900,
+      }
     );
   }, [ready, sensors]);
 
@@ -426,20 +442,36 @@ export default function SkyMap() {
       </div>
 
       {/* Instrument rail. Flush to the edge rather than a floating card. */}
-      <aside className="absolute inset-y-0 left-0 z-10 flex w-[304px] max-w-[86vw] flex-col border-r border-edge bg-night/92 backdrop-blur-xl">
-        <header className="border-b border-edge px-5 py-4">
-          <div className="flex items-start justify-between">
-            <div>
+      <aside className="absolute inset-x-0 top-0 z-10 flex max-h-[80dvh] flex-col border-b border-edge bg-night/92 backdrop-blur-xl md:inset-x-auto md:inset-y-0 md:left-0 md:max-h-none md:w-[304px] md:border-b-0 md:border-r">
+        <header className="px-5 py-4 md:border-b md:border-edge">
+          <div className="flex items-start justify-between gap-3">
+            <div className="min-w-0">
               <h1 className="text-[17px] font-medium tracking-tight text-bone">SkyEar</h1>
-              <p className="mt-0.5 text-[12px] text-slate">Vilnius · security cameras as ears</p>
+              <p className="mt-0.5 truncate text-[12px] text-slate">
+                Vilnius · security cameras as ears
+              </p>
             </div>
-            <button
-              onClick={() => setTheme((t) => (t === "dark" ? "light" : "dark"))}
-              className="rounded border border-edge px-1.5 py-0.5 text-[11px] text-slate hover:border-sodium hover:text-sodium"
-              aria-label={theme === "dark" ? "Switch to light map" : "Switch to dark map"}
-            >
-              {theme === "dark" ? "☀" : "☾"}
-            </button>
+            <div className="flex shrink-0 items-center gap-2">
+              {/* The headline figure stays visible when the sheet is closed,
+                  so the bar is worth its space on a small screen. */}
+              <span className="font-mono text-[15px] text-bone md:hidden">
+                {heardRate === null ? "--" : `${Math.round(heardRate * 100)}%`}
+              </span>
+              <button
+                onClick={() => setTheme((t) => (t === "dark" ? "light" : "dark"))}
+                className="rounded border border-edge px-1.5 py-0.5 text-[11px] text-slate hover:border-sodium hover:text-sodium"
+                aria-label={theme === "dark" ? "Switch to light map" : "Switch to dark map"}
+              >
+                {theme === "dark" ? "☀" : "☾"}
+              </button>
+              <button
+                onClick={() => setRailOpen((v) => !v)}
+                className="rounded border border-edge px-2 py-0.5 text-[11px] text-slate hover:border-sodium hover:text-sodium md:hidden"
+                aria-expanded={railOpen}
+              >
+                {railOpen ? "Hide" : "Details"}
+              </button>
+            </div>
           </div>
 
           <p className="mt-3 flex items-center gap-2 text-[12px]">
@@ -463,7 +495,9 @@ export default function SkyMap() {
           </p>
         </header>
 
-        <div className="scroll-thin flex-1 overflow-y-auto pb-4">
+        <div
+          className={`scroll-thin flex-1 overflow-y-auto pb-4 ${railOpen ? "" : "hidden md:block"}`}
+        >
           {/* The measurement the project turns on. */}
           <section className="border-b border-edge px-5 py-4">
             <div className="flex items-baseline gap-2">
@@ -575,7 +609,11 @@ export default function SkyMap() {
           )}
         </div>
 
-        <footer className="flex items-center justify-between border-t border-edge px-5 py-3">
+        <footer
+          className={`flex items-center justify-between border-t border-edge px-5 py-3 ${
+            railOpen ? "" : "hidden md:flex"
+          }`}
+        >
           <a href="/devices" className="text-[12px] text-slate hover:text-sodium">
             Your sensors
           </a>
@@ -601,7 +639,7 @@ export default function SkyMap() {
 
       {/* The most recent sound, in enough detail to judge it. */}
       {!selectedSensor && newest && (
-        <section className="absolute bottom-0 right-0 z-10 m-4 w-[332px] max-w-[86vw] rounded-sm border border-edge bg-night/92 shadow-[0_18px_50px_-12px_rgba(0,0,0,0.8)] backdrop-blur-xl">
+        <section className="absolute inset-x-0 bottom-0 z-10 max-h-[52dvh] overflow-hidden border-t border-edge bg-night/92 backdrop-blur-xl md:inset-x-auto md:bottom-0 md:right-0 md:m-4 md:w-[332px] md:rounded-sm md:border md:shadow-[0_18px_50px_-12px_rgba(0,0,0,0.8)]">
           <div className="flex items-start justify-between border-b border-edge px-4 py-3">
             <div>
               <h2 className="text-[13px] text-bone">
@@ -624,7 +662,7 @@ export default function SkyMap() {
             </p>
           )}
 
-          <ul className="scroll-thin max-h-[38vh] divide-y divide-edge/60 overflow-y-auto">
+          <ul className="scroll-thin max-h-[26dvh] divide-y divide-edge/60 overflow-y-auto md:max-h-[38vh]">
             {detections.slice(0, 14).map((d, i) => (
               <DetectionRow key={d.id} detection={d} active={i === 0} />
             ))}
