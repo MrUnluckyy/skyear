@@ -6,7 +6,11 @@ name: agent image
 #   skyear-agent            multi-arch manifest, for docker run / compose
 #   skyear-agent-aarch64    single-arch tags, which Home Assistant add-ons
 #   skyear-agent-amd64      require - they substitute {arch} rather than
-#   skyear-agent-armv7      relying on a manifest list.
+#                           relying on a manifest list.
+#
+# No armv7. numpy publishes no wheel for 32-bit ARM, so pip falls back to
+# compiling it from source in an image with no compiler. That covers only Pi 2
+# and 32-bit Pi OS; even a Pi Zero 2 W runs 64-bit, which is aarch64.
 on:
   push:
     tags: ["agent-v*"]
@@ -62,8 +66,6 @@ jobs:
             platform: linux/arm64
           - ha_arch: amd64
             platform: linux/amd64
-          - ha_arch: armv7
-            platform: linux/arm/v7
     steps:
       - uses: actions/checkout@v4
       - uses: docker/setup-qemu-action@v3
