@@ -91,6 +91,14 @@ body {
   50% { opacity: 0.8; }
 }
 
+/* A sound with nothing overhead to explain it. It turns rather than pulses:
+   a slow, standing mark that says unresolved, not alarm. */
+@keyframes unaccounted {
+  from { transform: rotate(0deg); opacity: 0.45; }
+  50%  { opacity: 0.85; }
+  to   { transform: rotate(360deg); opacity: 0.45; }
+}
+
 .ring-arrive { animation: arrive 3.4s cubic-bezier(0.3, 0, 0.2, 1) infinite; }
 /* Wavefronts arrive faster when there is more to hear. */
 .ring-rising  { animation-duration: 2s; }
@@ -100,6 +108,7 @@ body {
 .bearing-ray { animation: bearing-sweep 2.4s ease-out forwards; transform-origin: left center; }
 .breathe { animation: breathe 3.4s ease-in-out infinite; }
 .sustain { animation: sustain 1.15s ease-in-out infinite; }
+.unaccounted-ring { animation: unaccounted 9s linear infinite; }
 
 /* Silence every ambient loop for anyone who asked for less motion. */
 @media (prefers-reduced-motion: reduce) {
@@ -107,7 +116,8 @@ body {
   .ear-flare,
   .bearing-ray,
   .breathe,
-  .sustain {
+  .sustain,
+  .unaccounted-ring {
     animation: none;
   }
   .ring-arrive { opacity: 0.28; }

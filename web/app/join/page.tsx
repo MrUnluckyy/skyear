@@ -306,6 +306,44 @@ export default function Join() {
           </ol>
         </section>
 
+        {/*
+          People ask this immediately, and the honest answer has a caveat that
+          matters more than the instructions. A speaker at two metres arrives
+          with every harmonic intact; the same aircraft at three kilometres
+          arrives with the top of its spectrum absorbed by the air. Measured
+          here: a real piston aircraft scored 0.07 on the periodicity feature
+          that synthetic engine sound scored 0.23 on. So a speaker test proves
+          the chain works, and proves nothing about detection range.
+        */}
+        <section className="mt-6 border border-edge">
+          <h2 className="border-b border-edge px-6 py-4 text-[15px] text-bone">
+            Testing it with a speaker
+          </h2>
+          <div className="p-6">
+            <p className="max-w-[64ch] text-[14px] leading-relaxed text-slate">
+              Play a recording of an aircraft or a drone through a phone or speaker near the
+              camera, at normal listening volume, for at least fifteen seconds — a short burst is
+              filtered out as a click. Keep the setup page open: the level meter should rise while
+              it plays, and within a minute or two the sound appears on the map as an{" "}
+              <span className="text-sodium">unexplained sound</span>, because nothing with a
+              transponder was overhead.
+            </p>
+            <p className="mt-4 max-w-[64ch] text-[14px] leading-relaxed text-slate">
+              That is a real test of one thing: audio is reaching the detector, the detector fires,
+              the event uploads, and the map draws it. It is the fastest way to confirm a new
+              sensor end to end.
+            </p>
+            <p className="mt-4 max-w-[64ch] text-[14px] leading-relaxed text-slate-dim">
+              It is not a test of whether SkyEar can hear a drone. A speaker two metres away
+              delivers the whole spectrum; three kilometres of air removes the upper harmonics and
+              a propeller smears what is left. Measured at this site, a real light aircraft scored
+              a third of the periodicity a synthesised one did. Anything tuned against a speaker
+              would be tuned against the wrong signal — so treat the result as &ldquo;the wiring
+              works&rdquo;, and nothing more.
+            </p>
+          </div>
+        </section>
+
         <section className="mt-6 border border-edge">
           <h2 className="border-b border-edge px-6 py-4 text-[15px] text-bone">
             What crosses your network boundary

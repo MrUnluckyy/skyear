@@ -21,17 +21,23 @@ export function SensorBeacon({
   phase,
   flareKey,
   bearing,
+  name,
   label,
   detail,
   count = 0,
+  unaccounted = 0,
 }: {
   phase: SensorPhase;
   flareKey: number;
   bearing: number | null;
+  /** What this marker is called. Stable, so it survives a poll. */
+  name?: string;
   label: string;
   detail?: string;
   /** More than one sensor at this point, shown on the marker itself. */
   count?: number;
+  /** Recent sounds here that no aircraft accounts for. */
+  unaccounted?: number;
 }) {
   const { colour, ring, stagger } = PHASE_STYLE[phase];
   const live = phase !== "offline";
@@ -76,6 +82,20 @@ export function SensorBeacon({
         />
       )}
 
+      {/*
+        A standing mark for sound nothing accounts for.
+        Drawn as a broken ring rather than a warning: the evidence is an absence
+        - no aircraft overhead - and the marker should say "look here", not
+        "drone". It persists for the window rather than flashing, because the
+        sound has already finished by the time it reaches the map.
+      */}
+      {unaccounted > 0 && (
+        <span
+          className="unaccounted-ring absolute rounded-full border border-dashed"
+          style={{ inset: -20, borderColor: "var(--sodium)" }}
+        />
+      )}
+
       {/* The ear itself. It sustains while a sound is actually being heard. */}
       {count <= 1 && (
         <span
@@ -104,11 +124,20 @@ export function SensorBeacon({
         </span>
       )}
       <span
-        className="absolute whitespace-nowrap font-mono text-[10px] tracking-tight"
-        style={{ top: 14, left: -10, color: colour }}
+        className="absolute whitespace-nowrap font-mono text-[10px] leading-tight tracking-tight"
+        style={{ top: 14, left: -10 }}
       >
-        {label}
-        {detail && <span className="ml-1 opacity-70">{detail}</span>}
+        {name && <span className="block text-bone">{name}</span>}
+        <span className="block" style={{ color: unaccounted > 0 ? "var(--sodium)" : colour }}>
+          {unaccounted > 0
+            ? `${unaccounted} unexplained`
+            : (
+                <>
+                  {label}
+                  {detail && <span className="ml-1 opacity-70">{detail}</span>}
+                </>
+              )}
+        </span>
       </span>
     </div>
   );

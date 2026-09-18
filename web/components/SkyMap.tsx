@@ -9,17 +9,21 @@ import {
   PHASE_LABEL,
   PHASE_RANK,
   verdict,
-  noiseBaseline,
-  observedWindow,
+  fleetBaseline,
+  fleetWindow,
+  sensorNames,
   sensorPhase,
+  unaccountedBySensor,
   type Aircraft,
   type PublicDetection,
   type PublicSensor,
   type SensorStats,
+  type SpectrumBaseline,
   type TypeStats,
 } from "@/lib/types";
 import { DetectionRow, OctaveBars, SensorBeacon } from "./SensorBeacon";
 import SensorPanel from "./SensorPanel";
+import { PeriodicityNote, SoundProfile, TiltScale } from "./SoundProfile";
 
 /** Vilnius old town. A default centre should be a city, not a contributor's street. */
 /**
@@ -82,6 +86,7 @@ export default function SkyMap() {
   const [detections, setDetections] = useState<PublicDetection[]>([]);
   const [stats, setStats] = useState<SensorStats[]>([]);
   const [types, setTypes] = useState<TypeStats[]>([]);
+  const [spectrum, setSpectrum] = useState<SpectrumBaseline[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [selected, setSelected] = useState<string | null>(null);
   // On a phone the rail is a sheet that starts closed, so the map - the thing
@@ -276,17 +281,21 @@ export default function SkyMap() {
     let alive = true;
 
     const load = async () => {
-      const [s, d, st, ty] = await Promise.all([
-        supabase.from("public_sensors").select("*"),
+      const [s, d, st, ty, sb] = await Promise.all([
+        // Ordered, always. The numbering people see is positional, so an
+        // unordered result renames every sensor between polls.
+        supabase.from("public_sensors").select("*").order("id"),
         supabase.from("public_detections").select("*").order("started_at", { ascending: false }).limit(60),
         supabase.from("public_sensor_stats").select("*"),
         supabase.from("public_type_stats").select("*").order("passes", { ascending: false }),
+        supabase.from("public_spectrum_baseline").select("*"),
       ]);
       if (!alive) return;
       setError(s.error ? s.error.message : null);
       setSensors((s.data as PublicSensor[]) ?? []);
       setStats((st.data as SensorStats[]) ?? []);
       setTypes((ty.data as TypeStats[]) ?? []);
+      setSpectrum((sb.data as SpectrumBaseline[]) ?? []);
 
       const rows = (d.data as PublicDetection[]) ?? [];
       setDetections(rows);
@@ -305,7 +314,7 @@ export default function SkyMap() {
     // Sensor liveness is polled faster than history: the agent heartbeats every
     // 10 s, and a "hearing something right now" badge is worthless if it lags.
     const loadLive = async () => {
-      const s = await supabase.from("public_sensors").select("*");
+      const s = await supabase.from("public_sensors").select("*").order("id");
       if (!alive || s.error) return;
       setSensors((s.data as PublicSensor[]) ?? []);
     };
@@ -341,7 +350,7 @@ export default function SkyMap() {
     [stats]
   );
 
-  const baseline = noiseBaseline(stats[0]);
+  const baseline = fleetBaseline(stats);
   const heardRate = total.passes ? total.heard / total.passes : null;
   const airborne = aircraft.filter((a) => a.alt_m > 0).length;
   const newest = detections[0] ?? null;
@@ -376,6 +385,14 @@ export default function SkyMap() {
     return out;
   }, [sensors, points]);
 
+  /*
+   * Names, fixed to the sensor rather than to its position in a result set.
+   * Someone who opened "Sensor 1" expects to still be looking at it a poll
+   * later; an owner who named it expects to see that name here.
+   */
+  const names = useMemo(() => sensorNames(sensors), [sensors]);
+  const recentUnaccounted = useMemo(() => unaccountedBySensor(detections), [detections]);
+
   const online = sensors.filter((s) => s.online).length;
   const selectedSensor = sensors.find((s) => s.id === selected) ?? null;
   const hearing = sensors.filter((s) => s.hearing_now).length;
@@ -408,6 +425,10 @@ export default function SkyMap() {
           const bearing = flare && newest?.sensor_id === lead.id ? newest.match_bearing : null;
           const many = cluster.members.length > 1;
           const key = cluster.members.map((m) => m.id).join("+");
+          const unexplained = cluster.members.reduce(
+            (n, m) => n + (recentUnaccounted[m.id] ?? 0),
+            0
+          );
 
           return (
             <div key={key} className="absolute" style={{ left: cluster.x, top: cluster.y }}>
@@ -421,14 +442,16 @@ export default function SkyMap() {
                 aria-label={
                   many
                     ? `Show the ${cluster.members.length} sensors here`
-                    : "Show what this sensor has heard"
+                    : `Show what ${names[lead.id] ?? "this sensor"} has heard`
                 }
               />
               <SensorBeacon
                 phase={phase}
                 flareKey={flare}
                 bearing={bearing}
-                label={many ? `${cluster.members.length} sensors` : PHASE_LABEL[phase]}
+                name={many ? `${cluster.members.length} sensors` : names[lead.id]}
+                label={PHASE_LABEL[phase]}
+                unaccounted={unexplained}
                 detail={
                   phase === "hearing" && lead.hearing_for_s >= 1
                     ? `${Math.round(lead.hearing_for_s)}s`
@@ -508,7 +531,7 @@ export default function SkyMap() {
               <span className="text-[12px] text-slate">of passes heard</span>
             </div>
             <p className="mt-1 font-mono text-[11px] text-slate-dim">
-              {total.heard}/{total.passes} aircraft · {observedWindow(stats[0])}
+              {total.heard}/{total.passes} aircraft · {fleetWindow(stats)}
             </p>
 
             {/* A heard rate has to beat the noise it is swimming in. */}
@@ -626,6 +649,8 @@ export default function SkyMap() {
       {selectedSensor && (
         <SensorPanel
           sensor={selectedSensor}
+          names={names}
+          spectrum={spectrum}
           stats={stats.find((x) => x.sensor_id === selectedSensor.id)}
           types={types}
           detections={detections}
@@ -639,13 +664,16 @@ export default function SkyMap() {
 
       {/* The most recent sound, in enough detail to judge it. */}
       {!selectedSensor && newest && (
-        <section className="absolute inset-x-0 bottom-0 z-10 max-h-[52dvh] overflow-hidden border-t border-edge bg-night/92 backdrop-blur-xl md:inset-x-auto md:bottom-0 md:right-0 md:m-4 md:w-[332px] md:rounded-sm md:border md:shadow-[0_18px_50px_-12px_rgba(0,0,0,0.8)]">
-          <div className="flex items-start justify-between border-b border-edge px-4 py-3">
-            <div>
-              <h2 className="text-[13px] text-bone">
+        <section className="absolute inset-x-0 bottom-0 z-10 flex max-h-[62dvh] flex-col overflow-hidden border-t border-edge bg-night/92 backdrop-blur-xl md:inset-x-auto md:bottom-0 md:right-0 md:m-4 md:max-h-[74dvh] md:w-[332px] md:rounded-sm md:border md:shadow-[0_18px_50px_-12px_rgba(0,0,0,0.8)]">
+          <div className="flex shrink-0 items-start justify-between border-b border-edge px-4 py-3">
+            <div className="min-w-0">
+              <h2
+                className={`text-[13px] ${newest.match_flight ? "text-bone" : "text-sodium"}`}
+              >
                 {newest.match_flight ?? "Sound with no aircraft overhead"}
               </h2>
               <p className="mt-0.5 font-mono text-[11px] text-slate-dim">
+                {names[newest.sensor_id] ?? "a sensor"} ·{" "}
                 {new Date(newest.started_at).toLocaleTimeString()}
                 {newest.match_type ? ` · ${newest.match_type}` : ""}
                 {newest.match_slant_m ? ` · ${(newest.match_slant_m / 1000).toFixed(1)} km away` : ""}
@@ -654,6 +682,7 @@ export default function SkyMap() {
             <OctaveBars octaves={newest.octave_db} />
           </div>
 
+          <div className="scroll-thin flex-1 overflow-y-auto">
           {newest.match_delay_s !== null && (
             <p className="border-b border-edge px-4 py-2 text-[11px] leading-snug text-slate">
               Heard{" "}
@@ -662,11 +691,21 @@ export default function SkyMap() {
             </p>
           )}
 
-          <ul className="scroll-thin max-h-[26dvh] divide-y divide-edge/60 overflow-y-auto md:max-h-[38vh]">
+          {/* What it was, as far as anything can say. */}
+          {newest.octave_db && (
+            <div className="space-y-3 border-b border-edge px-4 py-3">
+              <SoundProfile detection={newest} />
+              <TiltScale detection={newest} baseline={spectrum} />
+              <PeriodicityNote detection={newest} />
+            </div>
+          )}
+
+          <ul className="divide-y divide-edge/60">
             {detections.slice(0, 14).map((d, i) => (
               <DetectionRow key={d.id} detection={d} active={i === 0} />
             ))}
           </ul>
+          </div>
         </section>
       )}
     </div>

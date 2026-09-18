@@ -1,8 +1,10 @@
 "use client";
 
+import { useState } from "react";
 import {
   OCTAVES,
   ago,
+  isUnaccounted,
   matchConfidence,
   noiseBaseline,
   sensorPhase,
@@ -10,8 +12,10 @@ import {
   type PublicDetection,
   type PublicSensor,
   type SensorStats,
+  type SpectrumBaseline,
   type TypeStats,
 } from "@/lib/types";
+import { PeriodicityNote, SoundFacts, SoundProfile, TiltScale } from "./SoundProfile";
 
 /**
  * Six octave levels as a fingerprint.
@@ -129,41 +133,72 @@ function MeasuredRange({ types }: { types: TypeStats[] }) {
   );
 }
 
-function DetectionLine({ d }: { d: PublicDetection }) {
+function DetectionLine({ d, spectrum }: { d: PublicDetection; spectrum: SpectrumBaseline[] }) {
+  // Collapsed by default. The summary answers "what was that", the expansion
+  // answers "how do you know", and only the second one needs the space.
+  const [open, setOpen] = useState(false);
   const kind = verdict(d);
   const confidence = matchConfidence(d);
   const unexplained = kind === "unexplained";
 
   return (
     <li
-      className={`grid grid-cols-[1fr_auto] items-start gap-3 border-l-2 py-2.5 pl-3 ${
+      className={`border-l-2 ${
         unexplained ? "border-l-sodium bg-sodium/[0.06]" : "border-l-transparent"
       }`}
     >
-      <div className="min-w-0">
-        <p className={`text-[13px] ${unexplained ? "text-sodium" : "text-bone"}`}>
-          {unexplained ? "Unexplained sound" : d.match_flight}
-          {!unexplained && confidence !== "strong" && (
-            <span className="ml-1.5 text-[10px] text-slate-dim">
-              {confidence === "weak" ? "· weak match" : "· probable"}
-            </span>
+      <button
+        onClick={() => setOpen((v) => !v)}
+        aria-expanded={open}
+        className="grid w-full grid-cols-[1fr_auto] items-start gap-3 py-2.5 pl-3 pr-1 text-left hover:bg-haze/50"
+      >
+        <div className="min-w-0">
+          <p className={`text-[13px] ${unexplained ? "text-sodium" : "text-bone"}`}>
+            {unexplained ? "Unexplained sound" : d.match_flight}
+            {!unexplained && confidence !== "strong" && (
+              <span className="ml-1.5 text-[10px] text-slate-dim">
+                {confidence === "weak" ? "· weak match" : "· probable"}
+              </span>
+            )}
+          </p>
+          <p className="mt-0.5 font-mono text-[10.5px] text-slate-dim">
+            {ago(d.started_at)} · {Math.round(d.duration_s)}s
+            {d.snr_db != null && ` · ${d.snr_db.toFixed(0)} dB`}
+            {d.harmonic && " · periodic"}
+            {!unexplained && d.match_type && ` · ${d.match_type}`}
+            {!unexplained && d.match_slant_m != null && ` · ${(d.match_slant_m / 1000).toFixed(1)} km`}
+          </p>
+        </div>
+        <Fingerprint octaves={d.octave_db} />
+      </button>
+
+      {open && (
+        <div className="space-y-3 border-t border-edge/60 px-3 py-3">
+          {d.octave_db ? (
+            <SoundProfile detection={d} />
+          ) : (
+            <p className="text-[11px] text-slate-dim">No spectrum was stored for this one.</p>
           )}
-        </p>
-        <p className="mt-0.5 font-mono text-[10.5px] text-slate-dim">
-          {ago(d.started_at)} · {Math.round(d.duration_s)}s
-          {d.snr_db != null && ` · ${d.snr_db.toFixed(0)} dB`}
-          {d.harmonic && " · periodic"}
-          {!unexplained && d.match_type && ` · ${d.match_type}`}
-          {!unexplained && d.match_slant_m != null && ` · ${(d.match_slant_m / 1000).toFixed(1)} km`}
-        </p>
-      </div>
-      <Fingerprint octaves={d.octave_db} />
+          <TiltScale detection={d} baseline={spectrum} />
+          <SoundFacts detection={d} />
+          <PeriodicityNote detection={d} />
+          {isUnaccounted(d) && (
+            <p className="text-[11px] leading-snug text-slate-dim">
+              Nothing with a transponder was overhead when this arrived. That is not proof of a
+              drone — an aircraft without ADS-B, a vehicle, or a gust the filter missed would all
+              look the same from here.
+            </p>
+          )}
+        </div>
+      )}
     </li>
   );
 }
 
 export default function SensorPanel({
   sensor,
+  names,
+  spectrum,
   stats,
   types,
   detections,
@@ -172,6 +207,10 @@ export default function SensorPanel({
   onClose,
 }: {
   sensor: PublicSensor;
+  /** Stable display names, keyed by sensor id. */
+  names: Record<string, string>;
+  /** Measured tilt distributions, for placing one sound among the rest. */
+  spectrum: SpectrumBaseline[];
   stats?: SensorStats;
   types: TypeStats[];
   detections: PublicDetection[];
@@ -192,7 +231,7 @@ export default function SensorPanel({
       </div>
       <header className="flex items-start justify-between border-b border-edge px-5 py-3 md:py-4">
         <div>
-          <h2 className="text-[15px] text-bone">Sensor</h2>
+          <h2 className="text-[15px] text-bone">{names[sensor.id] ?? "Sensor"}</h2>
           <p className="mt-0.5 font-mono text-[11px] text-slate-dim">
             {sensor.lat.toFixed(2)}, {sensor.lon.toFixed(2)} · approximate
           </p>
@@ -240,7 +279,7 @@ export default function SensorPanel({
                           : "var(--sodium)",
                   }}
                 />
-                Sensor {i + 1}
+                {names[s.id] ?? `Sensor ${i + 1}`}
               </button>
             );
           })}
@@ -289,7 +328,7 @@ export default function SensorPanel({
           ) : (
             <ul>
               {mine.slice(0, 30).map((d) => (
-                <DetectionLine key={d.id} d={d} />
+                <DetectionLine key={d.id} d={d} spectrum={spectrum} />
               ))}
             </ul>
           )}

@@ -158,3 +158,66 @@ history gets gappy. Worth testing `airplanes.live`, or moving up the local
 
 **Closed from the TODO list:** unit tests; ADS-B rate-limit backoff.
 **New:** replay mode timestamps start at epoch 0, so `start_iso` reads 1970.
+
+### 2026-09-18 — the spectrum does not identify aircraft; the tilt identifies wind
+Appended by Claude Code.
+
+**Sensors can be named.** `sensors.label` is owner-editable on `/devices` and
+published on the map. Before this, sensors were numbered by their position in an
+unordered PostgREST result, so "Sensor 1" and "Sensor 2" swapped between polls
+and the open panel appeared to jump to a different sensor. Numbering is now
+derived from a sort by `id`, which fixes the number to the sensor rather than to
+the row. The label being public is a deliberate tradeoff, stated in the UI where
+the name is typed: "the shed" is harmless, a name and a street is not.
+
+**A modelled "what could this sound be" diagram was built and then thrown away.**
+It drew three reference curves — wind, jet at 3 km, propeller — from physics.
+Checked against the stored events, the curves were fiction. Mean octave levels,
+dB, SNR > 12:
+
+| | 50 | 100 | 200 | 400 | 800 | 1.6k | tilt |
+|---|---|---|---|---|---|---|---|
+| wind (n=204) | 11.7 | 0.3 | −11.2 | −24.2 | −31.2 | −40.5 | 23.0 |
+| aircraft (n=56) | 10.2 | 2.0 | −6.5 | −17.5 | −26.4 | −34.5 | 16.7 |
+| unmatched (n=304) | 8.0 | 0.1 | −8.2 | −18.9 | −26.3 | −34.4 | 16.2 |
+
+Normalise those rows and the curves lie on top of each other. **Every source at
+this site falls away monotonically at 8–12 dB per octave, so the octave shape
+carries no information about what made the sound.** Only the steepness differs.
+The A21N that first exposed this was being labelled "closest to propeller" by
+the modelled curves.
+
+**Two findings follow, and both are load-bearing:**
+
+1. **The 20 dB wind threshold is validated.** Wind's 10th percentile tilt is
+   20.4 and confirmed aircraft's 90th is 19.2, on 204 and 56 events. The
+   threshold was set from two gusts on day one; it happens to sit almost exactly
+   in the gap. This is the first independent evidence for it.
+2. **Unmatched sounds are spectrally aircraft, not wind.** Their tilt
+   distribution (p10 11.6, p50 17.2, p90 19.3, n=304) sits on the aircraft
+   population, not the wind one. Whatever those 304 sounds are, they are not the
+   wind filter leaking — which is the assumption that would otherwise explain
+   them away.
+
+The diagram now shows measured distributions from a new view,
+`public_spectrum_baseline`, rather than drawn curves, so it cannot go stale.
+
+**CPP is dead in the field, now with numbers.** All three populations average
+0.066–0.073 — wind and confirmed piston aircraft alike, against the 0.228 the
+synthetic piston scored. It is still stored (it is training data) but it is
+shown with that caveat attached, and it cannot be calibrated from synthesis.
+
+**The headline baseline was being read off `stats[0]`**, an arbitrary row, so the
+noise baseline flipped between 21% and 4% between polls — the difference between
+"this works" and "this is coincidence". Pooled across sensors it is 19%, against
+a 27% heard rate on 35 h of listening.
+
+**On testing with a speaker** (`/join` now says this): playing drone or aircraft
+audio near the camera tests the chain end to end — audio in, detector fires,
+event uploads, map draws it — and nothing else. A speaker at two metres delivers
+the whole spectrum; three kilometres of air removes the top of it. Anything
+tuned against a speaker is tuned against the wrong signal.
+
+**Migrations 0008–0011 were applied to the database days before they existed in
+this repo.** They have been written back. Apply through the repo, not the MCP
+tool, or the schema history is only in Supabase.
