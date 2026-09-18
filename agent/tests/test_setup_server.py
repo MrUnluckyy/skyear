@@ -259,3 +259,23 @@ def test_ingress_base_path_tolerates_a_missing_trailing_slash():
 
     page = (Path(skyear.__file__).parent / "setup.html").read_text()
     assert 'document.baseURI.endsWith("/")' in page
+
+
+def test_pairing_is_not_blocked_by_the_address_bar_update():
+    """The URL rewrite used to sit between saving and pairing.
+
+    Inside Home Assistant's ingress iframe it can throw, which saved the camera
+    and then silently skipped the pairing call - the user saw an error and no
+    sensor ever appeared. It now runs last and cannot abort anything.
+    """
+    from pathlib import Path
+    import skyear
+
+    page = (Path(skyear.__file__).parent / "setup.html").read_text()
+    save_at = page.index('api("api/save"')
+    pair_at = page.index('api("api/pair"')
+    rewrite_at = page.index("history.replaceState")
+    assert save_at < pair_at < rewrite_at, "pairing must happen before the URL rewrite"
+    # and the rewrite must be inside a try block
+    prefix = page[:rewrite_at]
+    assert prefix.rindex("try {") > prefix.rindex("const code ="), "rewrite must be guarded"

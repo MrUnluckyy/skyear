@@ -1,4 +1,4 @@
-__version__ = "0.2.6"
+__version__ = "0.2.7"
 
 # Where SkyEar lives. An agent installed from the published image has no
 # config file, so without a default it cannot pair at all - which is exactly

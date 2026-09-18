@@ -246,14 +246,6 @@ $("save").onclick = async () => {
     });
     if (s.error) throw new Error(s.error);
 
-    // Saving locks the agent to whoever set it up. The cookie handles this
-    // browser; putting the token in the URL keeps a reload or a bookmark
-    // working, and gives a way in from another device.
-    if (s.setup_token && !q.get("t")) {
-      q.set("t", s.setup_token);
-      history.replaceState(null, "", `${location.pathname}?${q}`);
-    }
-
     const code = $("code").value.trim().toUpperCase();
     if (code) {
       const p = await api("api/pair", {
@@ -269,6 +261,22 @@ $("save").onclick = async () => {
     } else {
       msg($("saveMsg"), "Camera saved. Add a pairing code to connect it to SkyEar.", true);
     }
+
+    /*
+     * Keep the token in the URL so a reload or another device still works.
+     *
+     * Deliberately last, and deliberately swallowed: this only prettifies the
+     * address bar, and inside Home Assistant's ingress iframe it can throw. It
+     * used to sit between saving and pairing, so a failure here saved the
+     * camera and then silently skipped the pairing call.
+     */
+    try {
+      if (s.setup_token && !q.get("t")) {
+        q.set("t", s.setup_token);
+        history.replaceState(null, "", `${location.pathname}?${q}`);
+      }
+    } catch { /* the cookie already covers this browser */ }
+
     load();
   } catch (e) { msg($("saveMsg"), e.message || "Could not save.", false); }
   btn.disabled = false; btn.textContent = "Save and connect";
