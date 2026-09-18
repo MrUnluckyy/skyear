@@ -147,7 +147,11 @@ const q = new URLSearchParams(location.search);
  * query string and concatenating the token would produce a second "?".
  */
 const api = (p, opts) => {
-  const url = new URL(p, document.baseURI);
+  // Relative resolution drops the last path segment when the base has no
+  // trailing slash, which under ingress would strip the token out of
+  // /api/hassio_ingress/<token> and send every call to the wrong place.
+  const base = document.baseURI.endsWith("/") ? document.baseURI : document.baseURI + "/";
+  const url = new URL(p, base);
   if (q.get("t")) url.searchParams.set("t", q.get("t"));
   // same-origin credentials so the setup cookie comes back with every call
   return fetch(url, { credentials: "same-origin", ...(opts || {}) }).then(r => r.json());

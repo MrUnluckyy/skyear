@@ -244,7 +244,18 @@ def test_page_uses_relative_api_paths_for_ingress():
     import skyear
 
     page = (Path(skyear.__file__).parent / "setup.html").read_text()
-    assert 'new URL(p, document.baseURI)' in page, "must resolve against the page"
+    assert "new URL(p, base)" in page, "must resolve against the page, not the origin"
     assert 'api("/api' not in page and "api(`/api" not in page, "no absolute API paths"
     for route in ("api/state", "api/save", "api/pair", "api/test", "api/level"):
         assert route in page
+
+
+def test_ingress_base_path_tolerates_a_missing_trailing_slash():
+    """Relative resolution drops the last segment when the base lacks a
+    trailing slash, which would strip the token from an ingress path and send
+    every call somewhere harmless and wrong."""
+    from pathlib import Path
+    import skyear
+
+    page = (Path(skyear.__file__).parent / "setup.html").read_text()
+    assert 'document.baseURI.endsWith("/")' in page
