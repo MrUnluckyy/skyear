@@ -21,7 +21,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 from . import DEFAULT_CLOUD_URL, __version__, config_store
-from .audio import build_url, redact
+from .audio import build_url, redact_text
 from .uploader import CloudError, coarse, pair
 
 log = logging.getLogger("setup")
@@ -53,7 +53,8 @@ def probe_camera(cam: dict, secret: str, timeout: int = 25) -> dict:
             detail = "The camera rejected that username or password."
         elif "timed out" in low or "refused" in low:
             detail = "Could not reach the camera. Check the address, and that RTSP is enabled."
-        return {"ok": False, "error": redact(detail)}
+        # ffmpeg prose with the URL inside, not a bare URL.
+        return {"ok": False, "error": redact_text(detail, url)}
 
     try:
         streams = json.loads(r.stdout).get("streams", [])

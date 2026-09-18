@@ -1,6 +1,7 @@
 """Reads mono PCM from an RTSP camera (or a file) through ffmpeg."""
 from __future__ import annotations
 import logging
+import re
 import subprocess
 import time
 from urllib.parse import quote
@@ -72,6 +73,49 @@ def redact(url: str) -> str:
     return url
 
 
+# Any scheme://userinfo@host, anywhere in a blob of text.
+_CREDENTIAL_IN_TEXT = re.compile(r"(\w+://)([^/\s@]+)@")
+
+
+def url_secret(url: str) -> str:
+    """The part of a URL that is the credential, if there is one."""
+    if "://" not in url:
+        return ""
+    scheme, rest = url.split("://", 1)
+    if "@" in rest:
+        userinfo = rest.split("@", 1)[0]
+        return userinfo.split(":", 1)[1] if ":" in userinfo else ""
+    if scheme == "rtsps" and "/" in rest:
+        # UniFi: the path token is itself the credential.
+        return rest.split("/", 1)[1].split("?", 1)[0]
+    return ""
+
+
+def redact_text(text: str, url: str = "") -> str:
+    """Strip credentials out of arbitrary text, not just a bare URL.
+
+    redact() takes a URL we constructed. This takes ffmpeg's stderr, which is
+    prose with a URL buried in it - and ffmpeg prints the URL in full,
+    credentials included, on every failure. Passing that straight to the log
+    wrote the camera password into out/agent.log once per reconnect:
+
+        Error opening input file rtsp://admin:hunter2@192.168.1.88:554/...
+
+    The file is gitignored so nothing reached the repo, but a log is the thing
+    people paste into a forum post or hand over when asking for help, and on
+    Home Assistant the add-on log is visible in the UI.
+
+    `url` is optional and only needed for the rtsps path-token form, which has
+    no '@' for the pattern to key on.
+    """
+    out = _CREDENTIAL_IN_TEXT.sub(r"\1***@", text)
+    secret = url_secret(url) if url else ""
+    if secret:
+        # Both the raw form and the percent-encoded one build_url produces.
+        out = out.replace(quote(secret, safe=""), "***").replace(secret, "***")
+    return out
+
+
 class AudioSource:
     """Yields (t_start_unix, float32 samples) chunks. Reconnects forever for live streams."""
 
@@ -127,10 +171,14 @@ class AudioSource:
                 proc.kill()
                 err = proc.stderr.read().decode(errors="ignore").strip()
                 proc.wait()
+            # Redact before truncating. Slicing first can cut through a URL so
+            # the pattern no longer matches, while a fragment of the password
+            # survives into the log.
+            safe = redact_text(err, self.url) if err else ""
             if not self.live:
-                if err:
-                    log.error("ffmpeg: %s", err[-500:])
+                if safe:
+                    log.error("ffmpeg: %s", safe[-500:])
                 return
-            log.warning("stream ended (%s), retry in %ss", err[-200:] or "no error", backoff)
+            log.warning("stream ended (%s), retry in %ss", safe[-200:] or "no error", backoff)
             time.sleep(backoff)
             backoff = min(backoff * 2, 60)
