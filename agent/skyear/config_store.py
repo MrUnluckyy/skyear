@@ -29,6 +29,51 @@ def path_for(data_dir: Path) -> Path:
     return Path(data_dir) / FILENAME
 
 
+def take_ownership(data_dir: Path, user: str = "skyear") -> bool:
+    """Claim the data directory, then stop being root.
+
+    Home Assistant mounts its own /data owned by root, so the chown baked into
+    the image applies to a directory the Supervisor immediately covers up. The
+    agent therefore starts as root, takes the mounted directory, and drops to
+    the unprivileged user - ending in exactly the same place as a standalone
+    container, which starts unprivileged and never needs this.
+
+    Returns True if privileges were dropped.
+    """
+    if os.geteuid() != 0:
+        return False
+
+    import grp
+    import pwd
+
+    try:
+        account = pwd.getpwnam(user)
+    except KeyError:
+        # Somebody's own build without our user. Leave it alone rather than
+        # guessing at an identity to become.
+        log.warning("running as root: no %s account to drop to", user)
+        return False
+
+    data_dir = Path(data_dir)
+    try:
+        data_dir.mkdir(parents=True, exist_ok=True)
+        for path in (data_dir, *data_dir.rglob("*")):
+            os.chown(path, account.pw_uid, account.pw_gid)
+    except OSError as e:
+        log.warning("could not take ownership of %s: %s", data_dir, e)
+
+    try:
+        os.setgroups(
+            [g.gr_gid for g in grp.getgrall() if account.pw_name in g.gr_mem]
+        )
+    except OSError:
+        pass
+    os.setgid(account.pw_gid)
+    os.setuid(account.pw_uid)
+    log.info("dropped privileges to %s", user)
+    return True
+
+
 def load(data_dir: Path) -> dict:
     p = path_for(data_dir)
     if not p.is_file():

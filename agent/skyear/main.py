@@ -292,6 +292,10 @@ def main():
     logging.basicConfig(level=os.environ.get("LOG_LEVEL", "INFO"),
                         format="%(asctime)s %(levelname)s %(name)s: %(message)s")
     out_dir = Path(args.data)
+    # Before anything touches the filesystem. Home Assistant starts add-ons as
+    # root over a root-owned /data, so the agent claims it and then stops being
+    # root; elsewhere it is already unprivileged and this does nothing.
+    config_store.take_ownership(out_dir)
     # config.yaml is now optional. It still wins where present, so existing
     # installs are untouched, but a fresh agent can be configured entirely from
     # the setup page instead of a text editor.
