@@ -108,8 +108,18 @@ class AudioSource:
                         log.info("audio flowing from %s", redact(self.url))
                     x = np.frombuffer(buf[: len(buf) // 2 * 2], dtype="<i2").astype(np.float32) / 32768.0
                     t = t0 + n / self.sr
-                    if self.live and abs(t - time.time()) > 3.0:  # re-anchor on drift/stall
-                        t0, n = time.time() - n / self.sr, n
+                    drift = t - time.time()
+                    if self.live and abs(drift) > 3.0:
+                        # The audio timeline has come loose from the clock -
+                        # a stalled stream, a backlog dumped at once, or the
+                        # process being suspended. Re-anchor to now, because a
+                        # stale timestamp silently breaks ADS-B matching: the
+                        # aircraft track history no longer covers it and every
+                        # detection comes back unexplained.
+                        if abs(drift) > 60:
+                            log.warning("audio clock was %.0f s from wall time, re-anchoring",
+                                        drift)
+                        t0 = time.time() - n / self.sr
                         t = t0 + n / self.sr
                     n += len(x)
                     yield t, x
