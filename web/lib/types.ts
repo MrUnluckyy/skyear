@@ -15,9 +15,13 @@ export type PublicSensor = {
   excess_db: number | null;
   /** False until the rolling noise floor has settled. */
   warm: boolean;
-  /** Reporting in, but no sound reaching the detector - a different fault
-   *  from being offline, and the one an operator would misread as silence. */
-  audio: boolean;
+  /**
+   * Whether sound is reaching the detector.
+   *
+   * Null when the agent does not report it - older agents predate the field,
+   * and treating that as false accused healthy sensors of being broken.
+   */
+  audio: boolean | null;
   reported_at: string | null;
 };
 

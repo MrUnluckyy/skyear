@@ -55,8 +55,18 @@ function Health({ sensor, stats }: { sensor: PublicSensor; stats?: SensorStats }
     ],
     [
       "Audio",
-      sensor.online ? (sensor.audio ? "reaching the detector" : "no sound arriving") : "—",
-      sensor.online && !sensor.audio ? "text-bad" : "text-bone",
+      !sensor.online
+        ? "—"
+        : sensor.audio === null
+          // The agent is too old to say. It is plainly receiving something if
+          // it has a noise floor, so do not imply a fault.
+          ? sensor.warm
+            ? "measuring a noise floor"
+            : "not reported"
+          : sensor.audio
+            ? "reaching the detector"
+            : "no sound arriving",
+      sensor.online && sensor.audio === false ? "text-bad" : "text-bone",
     ],
     [
       "Noise floor",

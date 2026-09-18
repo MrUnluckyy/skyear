@@ -187,9 +187,10 @@ Deno.serve(async (req) => {
       event_active: Boolean(raw.event_active),
       event_s: num(raw.event_s) ?? 0,
       warm: Boolean(raw.warm),
-      // False when the agent is running but no audio is reaching the detector,
-      // which is a different problem from the agent being down.
-      audio: Boolean(raw.audio),
+      // Null when the agent does not report it at all. Coercing absence to
+      // false made every agent older than this field look broken, while it sat
+      // there reporting the noise floor it had just measured.
+      audio: typeof raw.audio === "boolean" ? raw.audio : null,
       reported_at: new Date().toISOString(),
     });
   }
