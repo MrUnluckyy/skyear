@@ -146,15 +146,39 @@ const q = new URLSearchParams(location.search);
  * URL() rather than string joining, because some endpoints already carry a
  * query string and concatenating the token would produce a second "?".
  */
-const api = (p, opts) => {
+const api = async (p, opts) => {
   // Relative resolution drops the last path segment when the base has no
   // trailing slash, which under ingress would strip the token out of
   // /api/hassio_ingress/<token> and send every call to the wrong place.
   const base = document.baseURI.endsWith("/") ? document.baseURI : document.baseURI + "/";
   const url = new URL(p, base);
   if (q.get("t")) url.searchParams.set("t", q.get("t"));
-  // same-origin credentials so the setup cookie comes back with every call
-  return fetch(url, { credentials: "same-origin", ...(opts || {}) }).then(r => r.json());
+
+  let r;
+  try {
+    // same-origin credentials so the setup cookie comes back with every call
+    r = await fetch(url, { credentials: "same-origin", ...(opts || {}) });
+  } catch (e) {
+    return { error: `Could not reach the agent at ${url.pathname} (${e.message})` };
+  }
+
+  /*
+   * Never hand a parse failure to the user.
+   *
+   * When something upstream answers with an HTML error page instead of JSON,
+   * r.json() throws a browser-specific string - Safari says "The string did not
+   * match the expected pattern" - which tells nobody anything. Report what
+   * actually came back: the status, the path, and the first of the body.
+   */
+  const text = await r.text();
+  try {
+    return JSON.parse(text);
+  } catch {
+    return {
+      error: `${r.status} ${r.statusText || "error"} from ${url.pathname}` +
+             (text ? ` — ${text.replace(/<[^>]*>/g, " ").trim().slice(0, 140)}` : ""),
+    };
+  }
 };
 
 function msg(el, text, ok) {

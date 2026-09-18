@@ -279,3 +279,19 @@ def test_pairing_is_not_blocked_by_the_address_bar_update():
     # and the rewrite must be inside a try block
     prefix = page[:rewrite_at]
     assert prefix.rindex("try {") > prefix.rindex("const code ="), "rewrite must be guarded"
+
+
+def test_api_reports_http_failures_rather_than_parse_errors():
+    """A non-JSON response must not surface as a browser parse error.
+
+    When something upstream answers with an HTML error page, response.json()
+    throws a browser-specific string - Safari's is "The string did not match
+    the expected pattern" - which tells the user nothing about what failed.
+    """
+    from pathlib import Path
+    import skyear
+
+    page = (Path(skyear.__file__).parent / "setup.html").read_text()
+    assert "JSON.parse(text)" in page, "must parse defensively, not via r.json()"
+    assert "r.status" in page and "url.pathname" in page, "must report status and path"
+    assert ".then(r => r.json())" not in page, "no unguarded json() left"
