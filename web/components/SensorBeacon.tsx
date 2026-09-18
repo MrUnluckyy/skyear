@@ -23,12 +23,15 @@ export function SensorBeacon({
   bearing,
   label,
   detail,
+  count = 0,
 }: {
   phase: SensorPhase;
   flareKey: number;
   bearing: number | null;
   label: string;
   detail?: string;
+  /** More than one sensor at this point, shown on the marker itself. */
+  count?: number;
 }) {
   const { colour, ring, stagger } = PHASE_STYLE[phase];
   const live = phase !== "offline";
@@ -74,17 +77,32 @@ export function SensorBeacon({
       )}
 
       {/* The ear itself. It sustains while a sound is actually being heard. */}
-      <span
-        key={`ear-${flareKey}`}
-        className={`absolute block rounded-full ${hearing ? "sustain" : ""} ${
-          flareKey > 0 && !hearing ? "ear-flare" : ""
-        }`}
-        style={{
-          inset: hearing ? -7 : -5,
-          background: colour,
-          boxShadow: live ? `0 0 12px ${colour}` : "none",
-        }}
-      />
+      {count <= 1 && (
+        <span
+          key={`ear-${flareKey}`}
+          className={`absolute block rounded-full ${hearing ? "sustain" : ""} ${
+            flareKey > 0 && !hearing ? "ear-flare" : ""
+          }`}
+          style={{
+            inset: hearing ? -7 : -5,
+            background: colour,
+            boxShadow: live ? `0 0 12px ${colour}` : "none",
+          }}
+        />
+      )}
+      {count > 1 && (
+        <span
+          className="absolute flex items-center justify-center rounded-full font-mono text-[10px] font-medium"
+          style={{
+            inset: -9,
+            background: "var(--night-deep)",
+            border: `1.5px solid ${colour}`,
+            color: colour,
+          }}
+        >
+          {count}
+        </span>
+      )}
       <span
         className="absolute whitespace-nowrap font-mono text-[10px] tracking-tight"
         style={{ top: 14, left: -10, color: colour }}

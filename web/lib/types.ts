@@ -35,6 +35,15 @@ export function sensorPhase(s: PublicSensor): SensorPhase {
   return "listening";
 }
 
+/** Which state a group of sensors should show: the liveliest one. */
+export const PHASE_RANK: Record<SensorPhase, number> = {
+  offline: 0,
+  warming: 1,
+  listening: 2,
+  rising: 3,
+  hearing: 4,
+};
+
 export const PHASE_LABEL: Record<SensorPhase, string> = {
   offline: "offline",
   warming: "warming up",

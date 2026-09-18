@@ -7,6 +7,7 @@ import "maplibre-gl/dist/maplibre-gl.css";
 import { createClient } from "@/lib/supabase";
 import {
   PHASE_LABEL,
+  PHASE_RANK,
   verdict,
   noiseBaseline,
   observedWindow,
@@ -329,36 +330,35 @@ export default function SkyMap() {
   const airborne = aircraft.filter((a) => a.alt_m > 0).length;
   const newest = detections[0] ?? null;
   /*
-   * Sensors are published on a ~1 km grid, so two at one address resolve to the
-   * same point and the second is drawn underneath the first - invisible, and
-   * impossible to click. Fan a shared point out in screen space: the position
-   * being shown is still the same, which is the honest thing, but each sensor
-   * can be seen and selected.
+   * Group sensors that overlap on screen.
+   *
+   * Positions are published on a ~1 km grid, so sensors at one address resolve
+   * to the same point and no amount of zooming separates them. Scattering them
+   * by a fixed pixel offset made them clickable but implied they were in
+   * different places, which at low zoom reads as a wider network than exists.
+   *
+   * One marker per visual group, carrying a count, is both truer and clearer:
+   * zoom out and nearby sensors merge, zoom in and genuinely separate ones
+   * split apart on their own.
    */
-  const spread = useMemo(() => {
-    const groups = new Map<string, string[]>();
-    for (const s of sensors) {
-      const key = `${s.lat},${s.lon}`;
-      groups.set(key, [...(groups.get(key) ?? []), s.id]);
-    }
-    const out: Record<string, { dx: number; dy: number; shared: number }> = {};
-    for (const ids of groups.values()) {
-      if (ids.length === 1) {
-        out[ids[0]] = { dx: 0, dy: 0, shared: 1 };
-        continue;
+  const clusters = useMemo(() => {
+    const MERGE_PX = 34;
+    const out: { x: number; y: number; members: PublicSensor[] }[] = [];
+    for (const sensor of sensors) {
+      const p = points[sensor.id];
+      if (!p) continue;
+      const near = out.find((c) => Math.hypot(c.x - p.x, c.y - p.y) < MERGE_PX);
+      if (near) {
+        near.members.push(sensor);
+        // Sit the marker at the centre of what it represents.
+        near.x = (near.x * (near.members.length - 1) + p.x) / near.members.length;
+        near.y = (near.y * (near.members.length - 1) + p.y) / near.members.length;
+      } else {
+        out.push({ x: p.x, y: p.y, members: [sensor] });
       }
-      const radius = 18;
-      ids.forEach((id, i) => {
-        const angle = (i / ids.length) * Math.PI * 2 - Math.PI / 2;
-        out[id] = {
-          dx: Math.cos(angle) * radius,
-          dy: Math.sin(angle) * radius,
-          shared: ids.length,
-        };
-      });
     }
     return out;
-  }, [sensors]);
+  }, [sensors, points]);
 
   const online = sensors.filter((s) => s.online).length;
   const selectedSensor = sensors.find((s) => s.id === selected) ?? null;
@@ -381,36 +381,44 @@ export default function SkyMap() {
 
       {/* Sensors, drawn in the DOM so the arrival animation can be CSS. */}
       <div className="pointer-events-none absolute inset-0 overflow-hidden">
-        {sensors.map((s) => {
-          const p = points[s.id];
-          if (!p) return null;
-          const flare = flares[s.id] ?? 0;
-          const bearing = flare && newest?.sensor_id === s.id ? newest.match_bearing : null;
-          const phase = sensorPhase(s);
+        {clusters.map((cluster) => {
+          // The group shows its liveliest member: one sensor hearing something
+          // matters more than three sitting quiet.
+          const lead = cluster.members.reduce((best, s) =>
+            PHASE_RANK[sensorPhase(s)] > PHASE_RANK[sensorPhase(best)] ? s : best
+          );
+          const phase = sensorPhase(lead);
+          const flare = flares[lead.id] ?? 0;
+          const bearing = flare && newest?.sensor_id === lead.id ? newest.match_bearing : null;
+          const many = cluster.members.length > 1;
+          const key = cluster.members.map((m) => m.id).join("+");
+
           return (
-            <div
-              key={s.id}
-              className="absolute"
-              style={{
-                left: p.x + (spread[s.id]?.dx ?? 0),
-                top: p.y + (spread[s.id]?.dy ?? 0),
-              }}
-            >
+            <div key={key} className="absolute" style={{ left: cluster.x, top: cluster.y }}>
               <button
-                onClick={() => setSelected(s.id === selected ? null : s.id)}
+                onClick={() =>
+                  setSelected(
+                    cluster.members.some((m) => m.id === selected) ? null : lead.id
+                  )
+                }
                 className="pointer-events-auto absolute -left-7 -top-7 h-14 w-14 cursor-pointer rounded-full"
-                aria-label="Show what this sensor has heard"
+                aria-label={
+                  many
+                    ? `Show the ${cluster.members.length} sensors here`
+                    : "Show what this sensor has heard"
+                }
               />
               <SensorBeacon
                 phase={phase}
                 flareKey={flare}
                 bearing={bearing}
-                label={PHASE_LABEL[phase]}
+                label={many ? `${cluster.members.length} sensors` : PHASE_LABEL[phase]}
                 detail={
-                  phase === "hearing" && s.hearing_for_s >= 1
-                    ? `${Math.round(s.hearing_for_s)}s`
+                  phase === "hearing" && lead.hearing_for_s >= 1
+                    ? `${Math.round(lead.hearing_for_s)}s`
                     : undefined
                 }
+                count={many ? cluster.members.length : 0}
               />
             </div>
           );
@@ -583,7 +591,10 @@ export default function SkyMap() {
           stats={stats.find((x) => x.sensor_id === selectedSensor.id)}
           types={types}
           detections={detections}
-          sharing={(spread[selectedSensor.id]?.shared ?? 1) - 1}
+          siblings={
+            clusters.find((c) => c.members.some((m) => m.id === selectedSensor.id))?.members ?? []
+          }
+          onSelect={setSelected}
           onClose={() => setSelected(null)}
         />
       )}

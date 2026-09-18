@@ -5,6 +5,7 @@ import {
   ago,
   matchConfidence,
   noiseBaseline,
+  sensorPhase,
   verdict,
   type PublicDetection,
   type PublicSensor,
@@ -166,15 +167,17 @@ export default function SensorPanel({
   stats,
   types,
   detections,
-  sharing = 0,
+  siblings = [],
+  onSelect,
   onClose,
 }: {
   sensor: PublicSensor;
   stats?: SensorStats;
   types: TypeStats[];
   detections: PublicDetection[];
-  /** How many other sensors resolve to this same published point. */
-  sharing?: number;
+  /** Every sensor sharing this marker, including this one. */
+  siblings?: PublicSensor[];
+  onSelect?: (id: string) => void;
   onClose: () => void;
 }) {
   const mine = detections.filter((d) => d.sensor_id === sensor.id);
@@ -190,12 +193,10 @@ export default function SensorPanel({
           <p className="mt-0.5 font-mono text-[11px] text-slate-dim">
             {sensor.lat.toFixed(2)}, {sensor.lon.toFixed(2)} · approximate
           </p>
-          {sharing > 0 && (
-            <p className="mt-1 text-[11px] leading-snug text-slate-dim">
-              Shares this published point with {sharing} other sensor
-              {sharing > 1 ? "s" : ""} — positions are rounded to about a
-              kilometre, so nearby sensors land together. They are drawn slightly
-              apart to stay clickable.
+          {siblings.length > 1 && (
+            <p className="mt-1 max-w-[30ch] text-[11px] leading-snug text-slate-dim">
+              {siblings.length} sensors share this point. Positions are rounded to
+              about a kilometre, so neighbours arrive together.
             </p>
           )}
         </div>
@@ -207,6 +208,41 @@ export default function SensorPanel({
           Close
         </button>
       </header>
+
+      {/* Stacked sensors never separate by zooming, so the only way to reach
+          them is to switch between them here. */}
+      {siblings.length > 1 && onSelect && (
+        <nav className="flex gap-1.5 border-b border-edge px-5 py-3">
+          {siblings.map((s, i) => {
+            const active = s.id === sensor.id;
+            const phase = sensorPhase(s);
+            return (
+              <button
+                key={s.id}
+                onClick={() => onSelect(s.id)}
+                className={`flex items-center gap-1.5 rounded border px-2 py-1 text-[11px] ${
+                  active
+                    ? "border-sodium/60 bg-sodium/10 text-sodium"
+                    : "border-edge text-slate hover:border-sodium/40"
+                }`}
+              >
+                <span
+                  className="inline-block h-1.5 w-1.5 rounded-full"
+                  style={{
+                    background:
+                      phase === "hearing"
+                        ? "var(--signal)"
+                        : phase === "offline"
+                          ? "var(--slate-dim)"
+                          : "var(--sodium)",
+                  }}
+                />
+                Sensor {i + 1}
+              </button>
+            );
+          })}
+        </nav>
+      )}
 
       <div className="scroll-thin flex-1 overflow-y-auto">
         <section className="border-b border-edge px-5 py-4">
