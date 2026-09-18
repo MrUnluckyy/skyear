@@ -89,5 +89,11 @@ jobs:
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
+          # A plain image manifest, not an index. buildx otherwise attaches a
+          # provenance attestation, which turns a single-architecture tag into
+          # an index carrying an unknown/unknown entry - and the Supervisor
+          # wants a straightforward image for an add-on.
+          provenance: false
+          sbom: false
           cache-from: type=gha
           cache-to: type=gha,mode=max
