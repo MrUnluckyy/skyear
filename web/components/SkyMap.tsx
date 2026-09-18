@@ -7,6 +7,7 @@ import "maplibre-gl/dist/maplibre-gl.css";
 import { createClient } from "@/lib/supabase";
 import {
   PHASE_LABEL,
+  verdict,
   noiseBaseline,
   observedWindow,
   sensorPhase,
@@ -17,6 +18,7 @@ import {
   type TypeStats,
 } from "@/lib/types";
 import { DetectionRow, OctaveBars, SensorBeacon } from "./SensorBeacon";
+import SensorPanel from "./SensorPanel";
 
 /** Vilnius old town. A default centre should be a city, not a contributor's street. */
 /**
@@ -80,6 +82,7 @@ export default function SkyMap() {
   const [stats, setStats] = useState<SensorStats[]>([]);
   const [types, setTypes] = useState<TypeStats[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const [selected, setSelected] = useState<string | null>(null);
 
   // Screen positions for the DOM overlay, reprojected as the map moves.
   const [points, setPoints] = useState<Record<string, { x: number; y: number }>>({});
@@ -326,7 +329,11 @@ export default function SkyMap() {
   const airborne = aircraft.filter((a) => a.alt_m > 0).length;
   const newest = detections[0] ?? null;
   const online = sensors.filter((s) => s.online).length;
+  const selectedSensor = sensors.find((s) => s.id === selected) ?? null;
   const hearing = sensors.filter((s) => s.hearing_now).length;
+  // Sound nothing accounts for. For drone work this is the number that matters:
+  // a drone broadcasts nothing, so an unmatched sound is the whole signal.
+  const unexplainedCount = detections.filter((d) => verdict(d) === "unexplained").length;
 
   return (
     <div className="relative h-dvh w-full overflow-hidden bg-night-deep">
@@ -350,6 +357,11 @@ export default function SkyMap() {
           const phase = sensorPhase(s);
           return (
             <div key={s.id} className="absolute" style={{ left: p.x, top: p.y }}>
+              <button
+                onClick={() => setSelected(s.id === selected ? null : s.id)}
+                className="pointer-events-auto absolute -left-7 -top-7 h-14 w-14 cursor-pointer rounded-full"
+                aria-label="Show what this sensor has heard"
+              />
               <SensorBeacon
                 phase={phase}
                 flareKey={flare}
@@ -478,7 +490,7 @@ export default function SkyMap() {
             <h2 className="text-[12px] text-slate">Conditions</h2>
             <dl className="mt-3 grid grid-cols-2 gap-x-3 gap-y-3">
               {[
-                ["Noise floor", stats[0]?.avg_floor_db != null ? `${stats[0].avg_floor_db} dB` : "--"],
+                ["Unexplained", String(unexplainedCount)],
                 ["Events", String(total.detections)],
                 ["Wind-tagged", String(total.wind)],
                 ["Aircraft up", String(airborne)],
@@ -526,8 +538,18 @@ export default function SkyMap() {
         </footer>
       </aside>
 
+      {selectedSensor && (
+        <SensorPanel
+          sensor={selectedSensor}
+          stats={stats.find((x) => x.sensor_id === selectedSensor.id)}
+          types={types}
+          detections={detections}
+          onClose={() => setSelected(null)}
+        />
+      )}
+
       {/* The most recent sound, in enough detail to judge it. */}
-      {newest && (
+      {!selectedSensor && newest && (
         <section className="absolute bottom-0 right-0 z-10 m-4 w-[332px] max-w-[86vw] rounded-sm border border-edge bg-night/92 shadow-[0_18px_50px_-12px_rgba(0,0,0,0.8)] backdrop-blur-xl">
           <div className="flex items-start justify-between border-b border-edge px-4 py-3">
             <div>

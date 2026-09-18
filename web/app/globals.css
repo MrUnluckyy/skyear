@@ -17,6 +17,7 @@
   --frost: #c9e2f0;
   --signal: #57d1a8;
   --noise: #7c7a9e;
+  --bad: #e8736b;
 
   --bone: #e6edf2;
   --slate: #7d95a4;
@@ -32,6 +33,7 @@
   --color-frost: var(--frost);
   --color-signal: var(--signal);
   --color-noise: var(--noise);
+  --color-bad: var(--bad);
   --color-bone: var(--bone);
   --color-slate: var(--slate);
   --color-slate-dim: var(--slate-dim);

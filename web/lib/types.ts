@@ -15,6 +15,9 @@ export type PublicSensor = {
   excess_db: number | null;
   /** False until the rolling noise floor has settled. */
   warm: boolean;
+  /** Reporting in, but no sound reaching the detector - a different fault
+   *  from being offline, and the one an operator would misread as silence. */
+  audio: boolean;
   reported_at: string | null;
 };
 
@@ -52,6 +55,10 @@ export type PublicDetection = {
   dominant_hz: number | null;
   floor_db: number | null;
   low_tilt_db: number | null;
+  cpp_db: number | null;
+  f0_hz: number | null;
+  /** The sound repeats, the way an engine does and wind does not. */
+  harmonic: boolean;
   octave_db: Record<string, number> | null;
   match_flight: string | null;
   match_type: string | null;
@@ -116,4 +123,51 @@ export function observedWindow(stats: SensorStats | undefined): string {
   if (!s) return "no data yet";
   if (s < 5400) return `${Math.max(1, Math.round(s / 60))} min of listening`;
   return `${(s / 3600).toFixed(1)} h of listening`;
+}
+
+
+/** Minutes and hours, the way someone watching a live map reads them. */
+export function ago(iso: string): string {
+  const s = Math.max(0, (Date.now() - new Date(iso).getTime()) / 1000);
+  if (s < 60) return "just now";
+  if (s < 3600) return `${Math.round(s / 60)} min ago`;
+  if (s < 86_400) {
+    const h = Math.floor(s / 3600);
+    const m = Math.round((s % 3600) / 60);
+    return m ? `${h} h ${m} min ago` : `${h} h ago`;
+  }
+  return `${Math.floor(s / 86_400)} d ago`;
+}
+
+export type Verdict = "unexplained" | "aircraft";
+
+/**
+ * What a detection actually tells you.
+ *
+ * For drone work the interesting case is a sound nothing accounts for: a drone
+ * broadcasts nothing, so an unmatched sound is the entire signal, and a matched
+ * aircraft is a sound successfully ruled out.
+ *
+ * Wind never appears here - public_detections excludes it - so the counts in
+ * public_sensor_stats are the only place it is visible, as context for why a
+ * sensor is detecting poorly.
+ */
+export function verdict(d: PublicDetection): Verdict {
+  return d.match_flight ? "aircraft" : "unexplained";
+}
+
+/**
+ * How much weight a match deserves.
+ *
+ * With background noise filling ~14% of the time, plenty of matches are a
+ * sound and an aircraft coinciding rather than one causing the other. Showing
+ * a callsign as though it were established fact overstates what is known.
+ */
+export function matchConfidence(d: PublicDetection): "strong" | "fair" | "weak" {
+  if (!d.match_flight) return "weak";
+  const snr = d.snr_db ?? 0;
+  const near = (d.match_slant_m ?? 99_999) < 6000;
+  if (d.harmonic && snr > 20 && near) return "strong";
+  if (snr > 15 && near) return "fair";
+  return "weak";
 }

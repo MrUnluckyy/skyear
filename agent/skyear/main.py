@@ -127,6 +127,7 @@ def camera_worker(cam, cfg, adsb, out_dir, events_w, passes_w, stop, live=True):
         ring.add(t, x)
         state = det.state()
         state["at"] = time.time()
+        state["audio"] = True
         LIVE[cid] = state
         for ev in det.process(t, x):
             ev["id"] = uuid.uuid4().hex[:12]
@@ -337,10 +338,33 @@ def main():
     threading.Thread(target=adsb.run, args=(stop,), daemon=True, name="adsb").start()
     threading.Thread(target=cleanup_loop, args=(out_dir, cfg.get("clips", {}).get("keep_days", 14), stop),
                      daemon=True, name="cleanup").start()
+    # Seed liveness for every configured camera before any audio arrives. An
+    # agent whose camera is misconfigured used to send nothing whatsoever,
+    # making it indistinguishable from one that was switched off - the operator
+    # then has no idea whether to check the power or the password.
+    for c in cams:
+        LIVE.setdefault(c["id"], {"audio": False, "warm": False, "event_active": False,
+                                  "rising": False, "at": time.time()})
+
     uploader = make_uploader(cfg, out_dir)
     if uploader:
         threading.Thread(target=uploader.run, args=(stop,), daemon=True, name="upload").start()
         log.info("cloud upload enabled")
+    else:
+        # Pairing happens in the setup page while this process is already
+        # running, so watch for the token rather than requiring a restart
+        # nobody knows to perform.
+        def await_pairing():
+            while not stop.is_set():
+                stop.wait(5)
+                if stop.is_set() or not device_file(out_dir).is_file():
+                    continue
+                late = make_uploader(cfg, out_dir)
+                if late:
+                    log.info("paired - starting upload")
+                    late.run(stop)
+                return
+        threading.Thread(target=await_pairing, daemon=True, name="await-pair").start()
 
     threads = [threading.Thread(target=camera_worker, args=(c, cfg, adsb, out_dir, events_w, passes_w, stop),
                                 daemon=True, name=f"cam-{c['id']}") for c in cams]

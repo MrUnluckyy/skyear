@@ -187,6 +187,9 @@ Deno.serve(async (req) => {
       event_active: Boolean(raw.event_active),
       event_s: num(raw.event_s) ?? 0,
       warm: Boolean(raw.warm),
+      // False when the agent is running but no audio is reaching the detector,
+      // which is a different problem from the agent being down.
+      audio: Boolean(raw.audio),
       reported_at: new Date().toISOString(),
     });
   }
