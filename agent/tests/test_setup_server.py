@@ -232,3 +232,19 @@ def test_state_reports_where_it_will_connect(agent):
     _, _, base = agent
     _, state = get(base, "/api/state")
     assert state["cloud_url"] == DEFAULT_CLOUD_URL
+
+
+def test_page_uses_relative_api_paths_for_ingress():
+    """Home Assistant serves add-ons under /api/hassio_ingress/<token>/.
+
+    An absolute "/api/state" would miss the add-on entirely, so every call has
+    to resolve against the page rather than the origin.
+    """
+    from pathlib import Path
+    import skyear
+
+    page = (Path(skyear.__file__).parent / "setup.html").read_text()
+    assert 'new URL(p, document.baseURI)' in page, "must resolve against the page"
+    assert 'api("/api' not in page and "api(`/api" not in page, "no absolute API paths"
+    for route in ("api/state", "api/save", "api/pair", "api/test", "api/level"):
+        assert route in page

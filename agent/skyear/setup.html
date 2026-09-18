@@ -135,10 +135,19 @@
 <script>
 const $ = id => document.getElementById(id);
 const q = new URLSearchParams(location.search);
-// Build URLs properly: some endpoints already carry a query string, so
-// concatenating the token would produce a second "?".
+/**
+ * Resolve against the page, not the origin.
+ *
+ * Home Assistant serves add-ons through ingress at a path like
+ * /api/hassio_ingress/<token>/, so an absolute "/api/state" would miss the
+ * add-on entirely. Relative paths work in both places: standalone at the root,
+ * and nested under an ingress prefix.
+ *
+ * URL() rather than string joining, because some endpoints already carry a
+ * query string and concatenating the token would produce a second "?".
+ */
 const api = (p, opts) => {
-  const url = new URL(p, location.origin);
+  const url = new URL(p, document.baseURI);
   if (q.get("t")) url.searchParams.set("t", q.get("t"));
   // same-origin credentials so the setup cookie comes back with every call
   return fetch(url, { credentials: "same-origin", ...(opts || {}) }).then(r => r.json());
@@ -178,7 +187,7 @@ $("test").onclick = async () => {
   btn.disabled = true; btn.textContent = "Testing…";
   msg($("testMsg"), "Asking the camera what it streams. This can take a few seconds.", true);
   try {
-    const r = await api("/api/test", {
+    const r = await api("api/test", {
       method: "POST", headers: { "content-type": "application/json" },
       body: JSON.stringify({ camera: cameraFromForm(), secret: secretFromForm() }),
     });
@@ -197,7 +206,7 @@ async function fillElevation() {
   if (isNaN(lat) || isNaN(lon)) return;
   $("elevHint").textContent = "Looking it up…";
   try {
-    const r = await api(`/api/elevation?lat=${lat}&lon=${lon}`);
+    const r = await api(`api/elevation?lat=${lat}&lon=${lon}`);
     if (r.elevation_m != null) {
       $("elev").value = Math.round(r.elevation_m);
       $("elevHint").textContent = "Looked up from the position. Adjust if you know better.";
@@ -227,7 +236,7 @@ $("save").onclick = async () => {
   if (cam.lat == null || cam.lon == null) return msg($("saveMsg"), "Set the position first.", false);
   btn.disabled = true; btn.textContent = "Saving…";
   try {
-    const s = await api("/api/save", {
+    const s = await api("api/save", {
       method: "POST", headers: { "content-type": "application/json" },
       body: JSON.stringify({ camera: cam, secret: secretFromForm() }),
     });
@@ -243,7 +252,7 @@ $("save").onclick = async () => {
 
     const code = $("code").value.trim().toUpperCase();
     if (code) {
-      const p = await api("/api/pair", {
+      const p = await api("api/pair", {
         method: "POST", headers: { "content-type": "application/json" },
         body: JSON.stringify({ code }),
       });
@@ -263,7 +272,7 @@ $("save").onclick = async () => {
 
 async function load() {
   try {
-    const s = await api("/api/state");
+    const s = await api("api/state");
     if (s.error) return;
     $("steps").innerHTML = [
       s.configured ? "<b>camera set</b>" : "camera",
@@ -285,7 +294,7 @@ async function load() {
 
 async function level() {
   try {
-    const s = await api("/api/level");
+    const s = await api("api/level");
     const v = Object.values(s.live || {})[0];
     if (!v || v.excess_db == null) return;
     // Excess over this sensor's own noise floor, capped for display.
