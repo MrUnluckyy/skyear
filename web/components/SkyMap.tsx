@@ -328,6 +328,38 @@ export default function SkyMap() {
   const heardRate = total.passes ? total.heard / total.passes : null;
   const airborne = aircraft.filter((a) => a.alt_m > 0).length;
   const newest = detections[0] ?? null;
+  /*
+   * Sensors are published on a ~1 km grid, so two at one address resolve to the
+   * same point and the second is drawn underneath the first - invisible, and
+   * impossible to click. Fan a shared point out in screen space: the position
+   * being shown is still the same, which is the honest thing, but each sensor
+   * can be seen and selected.
+   */
+  const spread = useMemo(() => {
+    const groups = new Map<string, string[]>();
+    for (const s of sensors) {
+      const key = `${s.lat},${s.lon}`;
+      groups.set(key, [...(groups.get(key) ?? []), s.id]);
+    }
+    const out: Record<string, { dx: number; dy: number; shared: number }> = {};
+    for (const ids of groups.values()) {
+      if (ids.length === 1) {
+        out[ids[0]] = { dx: 0, dy: 0, shared: 1 };
+        continue;
+      }
+      const radius = 18;
+      ids.forEach((id, i) => {
+        const angle = (i / ids.length) * Math.PI * 2 - Math.PI / 2;
+        out[id] = {
+          dx: Math.cos(angle) * radius,
+          dy: Math.sin(angle) * radius,
+          shared: ids.length,
+        };
+      });
+    }
+    return out;
+  }, [sensors]);
+
   const online = sensors.filter((s) => s.online).length;
   const selectedSensor = sensors.find((s) => s.id === selected) ?? null;
   const hearing = sensors.filter((s) => s.hearing_now).length;
@@ -356,7 +388,14 @@ export default function SkyMap() {
           const bearing = flare && newest?.sensor_id === s.id ? newest.match_bearing : null;
           const phase = sensorPhase(s);
           return (
-            <div key={s.id} className="absolute" style={{ left: p.x, top: p.y }}>
+            <div
+              key={s.id}
+              className="absolute"
+              style={{
+                left: p.x + (spread[s.id]?.dx ?? 0),
+                top: p.y + (spread[s.id]?.dy ?? 0),
+              }}
+            >
               <button
                 onClick={() => setSelected(s.id === selected ? null : s.id)}
                 className="pointer-events-auto absolute -left-7 -top-7 h-14 w-14 cursor-pointer rounded-full"
@@ -544,6 +583,7 @@ export default function SkyMap() {
           stats={stats.find((x) => x.sensor_id === selectedSensor.id)}
           types={types}
           detections={detections}
+          sharing={(spread[selectedSensor.id]?.shared ?? 1) - 1}
           onClose={() => setSelected(null)}
         />
       )}

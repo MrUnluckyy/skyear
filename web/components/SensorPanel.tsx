@@ -166,12 +166,15 @@ export default function SensorPanel({
   stats,
   types,
   detections,
+  sharing = 0,
   onClose,
 }: {
   sensor: PublicSensor;
   stats?: SensorStats;
   types: TypeStats[];
   detections: PublicDetection[];
+  /** How many other sensors resolve to this same published point. */
+  sharing?: number;
   onClose: () => void;
 }) {
   const mine = detections.filter((d) => d.sensor_id === sensor.id);
@@ -187,6 +190,14 @@ export default function SensorPanel({
           <p className="mt-0.5 font-mono text-[11px] text-slate-dim">
             {sensor.lat.toFixed(2)}, {sensor.lon.toFixed(2)} · approximate
           </p>
+          {sharing > 0 && (
+            <p className="mt-1 text-[11px] leading-snug text-slate-dim">
+              Shares this published point with {sharing} other sensor
+              {sharing > 1 ? "s" : ""} — positions are rounded to about a
+              kilometre, so nearby sensors land together. They are drawn slightly
+              apart to stay clickable.
+            </p>
+          )}
         </div>
         <button
           onClick={onClose}
