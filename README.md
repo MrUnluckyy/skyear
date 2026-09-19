@@ -36,29 +36,60 @@ supabase/    Postgres schema, row-level security, Edge Functions.
 
 ## Run a sensor
 
-Full walkthrough: [the setup guide](web/app/join/page.tsx) — or the hosted
-version at `/join`.
+**[Follow the setup guide](https://skyear.vercel.app/join)** — it asks where you
+are installing and shows only the steps for that. Nothing below is needed if you
+use it.
+
+No account is required to try this. The agent installs and tests your camera on
+its own; you only sign in when you want the sensor on the map.
+
+### Home Assistant
+
+Add-on repository, separate so the Supervisor can read it:
+
+```
+https://github.com/MrUnluckyy/skyear-hassio
+```
+
+Settings → Add-ons → Add-on Store → ⋮ → Repositories → paste → Add. Refresh,
+install **SkyEar**, start it, and open the panel that appears in the sidebar.
+Ingress means there is no port to open and no address to find. Needs a 64-bit
+system: there is no 32-bit ARM build, because numpy publishes no wheel for it.
+
+### Docker, anywhere else
 
 ```bash
-# 1. Does your camera carry audio?
-ffprobe -v error -rtsp_transport tcp \
-  -show_entries stream=codec_type,codec_name,sample_rate -of compact \
-  "rtsp://USER:PASSWORD@CAMERA-IP:554/Preview_01_sub"
+docker run -d --name skyear --restart unless-stopped --pull always \
+  -p 8088:8088 -v skyear-data:/data ghcr.io/mrunluckyy/skyear-agent:latest
+```
 
-# 2. Configure
+Then open `http://THAT-MACHINE:8088` and fill in one form: camera make, address,
+password, position, and a pairing code from `/devices` when you want to connect.
+The image is published for `linux/amd64` and `linux/arm64`, so the same tag runs
+on a Synology, a Raspberry Pi 4 or 5, and an Intel box.
+
+Your camera's address and password are written only to that machine. There is no
+field anywhere on the website that asks for them.
+
+### Config files
+
+There is a `config.yaml`, and you do not need it. The setup page writes
+everything into the agent's data directory instead, which is why the guide never
+mentions it. It remains supported for unattended installs:
+
+```bash
 cp agent/config.example.yaml agent/config.yaml   # camera, position, height
 cp agent/.env.example agent/.env                 # camera password lives here only
-
-# 3. Verify camera audio and ADS-B reachability
-docker compose run --rm skyear --check
-
-# 4. Pair with a code generated at /devices, then run
+docker compose run --rm skyear --check           # camera audio + ADS-B reachability
 docker compose run --rm skyear --pair YOURCODE
 docker compose up -d
 ```
 
-The image is published for `linux/amd64` and `linux/arm64`, so the same tag runs
-on a Synology and on a Raspberry Pi 4 or 5.
+### More than one camera
+
+Add them on the same setup page — a camera bar appears once there is more than
+one. The agent tells the server which cameras it has on every upload, so a new
+one registers itself; restart the agent after adding it so it starts listening.
 
 ## What crosses your network boundary
 
@@ -85,7 +116,7 @@ details stripped.
 cd agent
 python3 -m venv .venv
 .venv/bin/python -m pip install -r requirements-dev.txt
-.venv/bin/python -m pytest          # 88 tests
+.venv/bin/python -m pytest          # 153 tests
 
 .venv/bin/python -m skyear.main --config config.yaml --data ./out --replay rec.wav
 ```

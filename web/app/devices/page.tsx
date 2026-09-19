@@ -21,7 +21,13 @@ type Device = {
   last_seen_at: string | null;
 };
 type Code = { code: string; expires_at: string; used_at: string | null };
-type Sensor = { id: string; device_id: string; camera_id: string; label: string | null };
+type Sensor = {
+  id: string;
+  device_id: string;
+  camera_id: string;
+  label: string | null;
+  retired_at: string | null;
+};
 
 const MAX_LABEL = 40;
 
@@ -35,9 +41,11 @@ const MAX_LABEL = 40;
 function SensorName({
   sensor,
   onSave,
+  onRetire,
 }: {
   sensor: Sensor;
   onSave: (id: string, label: string | null) => Promise<string | null>;
+  onRetire: (id: string, retired: boolean) => Promise<string | null>;
 }) {
   const [value, setValue] = useState(sensor.label ?? "");
   const [state, setState] = useState<"idle" | "saving" | "saved" | "error">("idle");
@@ -51,10 +59,13 @@ function SensorName({
     setState(err ? "error" : "saved");
   }
 
+  const retired = Boolean(sensor.retired_at);
+
   return (
-    <li className="py-2.5">
+    <li className={`py-2.5 ${retired ? "opacity-60" : ""}`}>
       <div className="flex flex-wrap items-center gap-2">
         <input
+          disabled={retired}
           value={value}
           maxLength={MAX_LABEL}
           onChange={(e) => {
@@ -70,14 +81,26 @@ function SensorName({
         />
         <button
           onClick={save}
-          disabled={!dirty || state === "saving"}
+          disabled={!dirty || state === "saving" || retired}
           className="rounded-lg border border-white/10 px-2.5 py-1.5 text-xs text-neutral-300 hover:border-sky-500/50 hover:text-sky-300 disabled:opacity-40"
         >
           {state === "saving" ? "Saving…" : "Save"}
         </button>
+        <button
+          onClick={async () => {
+            setState("saving");
+            const err = await onRetire(sensor.id, !retired);
+            setMessage(err);
+            setState(err ? "error" : "idle");
+          }}
+          className="rounded-lg border border-white/10 px-2.5 py-1.5 text-xs text-neutral-400 hover:border-amber-500/50 hover:text-amber-300"
+        >
+          {retired ? "Put back on the map" : "Remove from map"}
+        </button>
       </div>
       <p className="mt-1 text-xs text-neutral-500">
         camera <code className="text-neutral-400">{sensor.camera_id}</code>
+        {retired && <span className="ml-2 text-amber-400">off the map · history kept</span>}
         {state === "saved" && <span className="ml-2 text-emerald-400">saved</span>}
         {state === "error" && <span className="ml-2 text-red-400">{message}</span>}
       </p>
@@ -93,6 +116,7 @@ export default function Devices() {
   const [codes, setCodes] = useState<Code[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     const { data: user } = await supabase.auth.getUser();
@@ -101,7 +125,7 @@ export default function Devices() {
     const [d, se, c] = await Promise.all([
       supabase.from("devices").select("id,name,status,created_at,last_seen_at").order("created_at"),
       // RLS scopes this to the caller's own devices, so no filter is needed.
-      supabase.from("sensors").select("id,device_id,camera_id,label").order("created_at"),
+      supabase.from("sensors").select("id,device_id,camera_id,label,retired_at").order("created_at"),
       supabase.from("pairing_codes").select("code,expires_at,used_at").order("created_at", { ascending: false }).limit(5),
     ]);
     if (d.error) setError(d.error.message);
@@ -123,6 +147,51 @@ export default function Devices() {
     if (error) return error.message;
     setSensors((prev) => prev.map((s) => (s.id === id ? { ...s, label } : s)));
     return null;
+  }
+
+  /**
+   * Retirement rather than deletion.
+   *
+   * Every foreign key cascades, so deleting a sensor deletes its detections
+   * and passes with it. The value this project produces is the record of what
+   * was *not* heard, and a tidy-up button should not be able to discard days
+   * of it. Retiring hides the row everywhere public and keeps the history.
+   */
+  async function retireSensor(id: string, retired: boolean): Promise<string | null> {
+    const { error } = await supabase
+      .from("sensors")
+      .update({ retired_at: retired ? new Date().toISOString() : null })
+      .eq("id", id);
+    if (error) return error.message;
+    setSensors((prev) =>
+      prev.map((s) =>
+        s.id === id ? { ...s, retired_at: retired ? new Date().toISOString() : null } : s
+      )
+    );
+    return null;
+  }
+
+  /**
+   * Retiring a device also revokes it: ingest rejects any device whose status
+   * is not active, so the agent stops being accepted the moment this is set.
+   */
+  async function retireDevice(id: string, retired: boolean) {
+    setError(null);
+    const { error } = await supabase
+      .from("devices")
+      .update({ status: retired ? "retired" : "active" })
+      .eq("id", id);
+    if (error) return setError(error.message);
+    await load();
+  }
+
+  /** Permanent, and it takes every measurement with it. */
+  async function deleteDevice(id: string) {
+    setError(null);
+    const { error } = await supabase.from("devices").delete().eq("id", id);
+    if (error) return setError(error.message);
+    setConfirmDelete(null);
+    await load();
   }
 
   async function createCode() {
@@ -232,6 +301,14 @@ export default function Devices() {
             something that describes the spot, not the person — &ldquo;the shed&rdquo;, not your
             name and street.
           </p>
+          <p className="mt-2 text-xs leading-relaxed text-neutral-500">
+            <span className="text-neutral-400">Remove from map</span> hides a camera and keeps
+            everything it recorded — including the aircraft it did not hear, which is the part
+            that makes the data worth anything.{" "}
+            <span className="text-neutral-400">Disconnect</span> stops an agent being accepted at
+            all. Only <span className="text-neutral-400">Delete permanently</span> destroys
+            measurements, and it cannot be undone.
+          </p>
           {devices.length === 0 ? (
             <p className="mt-2 text-sm text-neutral-500">None yet.</p>
           ) : (
@@ -263,10 +340,52 @@ export default function Devices() {
                     {mine.length > 0 && (
                       <ul className="mt-2 divide-y divide-white/5 border-t border-white/5">
                         {mine.map((s) => (
-                          <SensorName key={s.id} sensor={s} onSave={saveLabel} />
+                          <SensorName
+                            key={s.id}
+                            sensor={s}
+                            onSave={saveLabel}
+                            onRetire={retireSensor}
+                          />
                         ))}
                       </ul>
                     )}
+
+                    <div className="mt-3 flex flex-wrap items-center gap-3 border-t border-white/5 pt-3">
+                      <button
+                        onClick={() => retireDevice(d.id, d.status === "active")}
+                        className="text-xs text-neutral-400 hover:text-amber-300"
+                      >
+                        {d.status === "active"
+                          ? "Disconnect this agent"
+                          : "Reconnect this agent"}
+                      </button>
+                      {confirmDelete === d.id ? (
+                        <span className="flex flex-wrap items-center gap-2 text-xs">
+                          <span className="text-red-300">
+                            Delete {d.name} and every measurement it made?
+                          </span>
+                          <button
+                            onClick={() => deleteDevice(d.id)}
+                            className="rounded border border-red-500/50 px-2 py-1 text-red-300 hover:bg-red-500/10"
+                          >
+                            Delete permanently
+                          </button>
+                          <button
+                            onClick={() => setConfirmDelete(null)}
+                            className="text-neutral-400 hover:text-neutral-200"
+                          >
+                            Cancel
+                          </button>
+                        </span>
+                      ) : (
+                        <button
+                          onClick={() => setConfirmDelete(d.id)}
+                          className="text-xs text-neutral-600 hover:text-red-400"
+                        >
+                          Delete permanently
+                        </button>
+                      )}
+                    </div>
                   </li>
                 );
               })}

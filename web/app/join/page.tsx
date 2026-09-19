@@ -1,5 +1,7 @@
 import type { Metadata } from "next";
 
+import SetupChooser from "@/components/SetupChooser";
+
 export const metadata: Metadata = {
   title: "Become a sensor · SkyEar",
   description:
@@ -28,72 +30,45 @@ type Step = {
 const STEPS: Step[] = [
   {
     where: "browser",
-    title: "Create your account",
-    body: "Enter your email. You get a one-time link back — there is no password to choose. Click it and you land on your sensors page, where you will generate a pairing code in a moment.",
-    link: { href: "/login", label: "Open the sign-in page" },
-    expect: "A page titled Sensors, with your email under it and no devices listed yet.",
+    title: "Tell it about your camera",
+    body: "On the setup page: pick the make, type the camera's address on your network, and enter the username and password you use in its own app. Press Test this camera. This is the moment that decides whether your camera can be a sensor at all, and it needs no account and no sign-up.",
+    expect: `Audio found — aac at 16000 Hz. This camera can be a sensor.`,
     stuck: [
-      { problem: "No email after a minute.", fix: "Check spam. It is sent by Supabase on behalf of SkyEar." },
-      { problem: "The link opens an error.", fix: "Links are single-use and expire. Request another." },
-    ],
-  },
-  {
-    where: "machine",
-    title: "Start the agent next to your camera",
-    body: "This runs on a machine that can reach your camera over the local network — a NAS, a Raspberry Pi, or any computer that stays on. It does not need to be powerful. It does need to stay awake, so a laptop is fine for trying it and poor for leaving it.",
-    code: `# Synology: Container Manager → Project → Create → paste this, then Build
-services:
-  skyear:
-    image: ghcr.io/mrunluckyy/skyear-agent:latest
-    pull_policy: always
-    container_name: skyear-agent
-    restart: unless-stopped
-    ports: ["8088:8088"]
-    volumes: ["./data:/data"]
-
-# Or, on any machine with a terminal. One line on purpose: pasted
-# multi-line commands get split by some terminals and fail confusingly.
-docker run -d --name skyear --restart unless-stopped --pull always -p 8088:8088 -v skyear-data:/data ghcr.io/mrunluckyy/skyear-agent:latest`,
-    expect: `The container starts and its log says:
-
-  setup page: http://192.168.1.144:8088
-  no camera configured yet - open the setup page above to add one
-
-That is expected. Nothing is configured yet.`,
-    stuck: [
-      { problem: "No Docker on the machine.", fix: "Synology: install Container Manager from Package Center. Linux or Raspberry Pi: curl -fsSL https://get.docker.com | sh" },
-      { problem: "Port 8088 already used.", fix: "Change the first number, for example 9088:8088, and use that port below." },
-      { problem: "\u201cThe container name /skyear is already in use.\u201d", fix: "An earlier attempt left one behind. Remove it with: docker rm -f skyear — then run the command again." },
-      { problem: "\u201ccommand not found: ghcr.io\u201d", fix: "The command was split across lines by the terminal. Copy it as the single line above, with no line breaks." },
-      { problem: "It restarts in a loop, and the log says FileNotFoundError: /config/config.yaml", fix: "An old image is cached locally. docker rm -f skyear, then run the command again - --pull always fetches the current one." },
+      { problem: "\u201cThe camera rejected that username or password.\u201d", fix: "Reolink usually wants admin and the password you set in its app, not your Reolink cloud login." },
+      { problem: "\u201cCould not reach the camera.\u201d", fix: "Check the address, and that RTSP is switched on in the camera settings. Most cameras have it off by default." },
+      { problem: "\u201cThis camera streams video but no audio.\u201d", fix: "That model has no microphone, or it is disabled in the camera's settings. Check there first; if there is no microphone, this camera cannot be a sensor." },
+      { problem: "The setup page does not load at all.", fix: "The agent log prints the exact address. In Docker it sometimes prints the container's own address, so use the machine's instead." },
     ],
   },
   {
     where: "browser",
-    title: "Open the setup page and fill in one form",
-    body: "Go to that machine's address with :8088 on the end — on a Synology, the same address you use for DSM. Everything else happens on one screen: pick your camera make, enter its address and password, press Test, set the position, and paste the pairing code from step one.",
-    code: "http://YOUR-MACHINE-ADDRESS:8088",
-    expect: `Test this camera reports something like:
-
-  Audio found — aac at 16000 Hz. This camera can be a sensor.
-
-Use my current location fills in the position, and the ground elevation is
-looked up for you. Then Save and connect.`,
+    title: "Set where it is listening from",
+    body: "Press Use my current location, or type the coordinates. The ground elevation is looked up for you; the mount height is roughly how high the camera is off the ground. Position matters because matching a sound to an aircraft is geometry — the distance decides how long the sound took to arrive.",
+    expect: "Latitude and longitude filled in, and an elevation that looks plausible for where you are.",
     stuck: [
-      { problem: "\u201cThe camera rejected that username or password.\u201d", fix: "Reolink usually wants admin and the password you set in its app." },
-      { problem: "\u201cCould not reach the camera.\u201d", fix: "Check the address, and that RTSP is switched on in the camera settings." },
-      { problem: "\u201cThis camera streams video but no audio.\u201d", fix: "Some models have no microphone. That one cannot be a sensor." },
-      { problem: "The page does not load at all.", fix: "The agent log prints the exact address to use. In Docker it may print the container address instead, so use the machine's own." },
+      { problem: "The browser refuses to share a location.", fix: "It only works on https or localhost. Type the coordinates instead — right-click your roof in Google Maps and copy the pair." },
+    ],
+  },
+  {
+    where: "browser",
+    title: "Create an account and connect",
+    body: "Only now, once you know the camera works. Enter your email, click the one-time link, press Generate pairing code, and paste that code into the setup page. Then press Save and connect.",
+    link: { href: "/login", label: "Sign in" },
+    expect: "Connected. Restart the agent and your sensor appears on the map within a minute.",
+    stuck: [
+      { problem: "No email after a minute.", fix: "Check spam — the first message from a new sender usually lands there. The link is single-use and expires in an hour." },
+      { problem: "The code is rejected.", fix: "Codes expire after 15 minutes and work once. Generate another." },
     ],
   },
   {
     where: "browser",
     title: "Watch it start listening",
-    body: "Restart the container so it picks up the camera, then open the map. Your sensor appears with wavefronts collapsing into it, and starts recording every aircraft that passes — heard or not.",
+    body: "Restart the agent so it picks up the camera, then open the map. Your sensor appears with wavefronts collapsing into it, and starts recording every aircraft that passes — heard or not. The level meter on the setup page moves whenever there is sound, which is the quickest way to confirm the microphone is really reaching it.",
     link: { href: "/", label: "Open the map" },
-    expect: "A dot where your camera is, labelled listening, and a rising count of aircraft. The level meter on the setup page moves whenever there is sound.",
+    expect: "A dot where your camera is, labelled listening, and a rising count of aircraft.",
     stuck: [
-      { problem: "The sensor does not appear.", fix: "The agent uploads every 10 seconds but only once it has something to say. Near an airport give it a few minutes; elsewhere longer." },
+      { problem: "The sensor does not appear.", fix: "The agent uploads every 10 seconds, but only once it has something to say. Near an airport give it a few minutes; elsewhere longer." },
+      { problem: "It says no sound arriving.", fix: "The camera streams audio but the agent is not receiving it. Restart the agent; if it persists, re-run Test this camera." },
     ],
   },
 ];
@@ -298,7 +273,22 @@ export default function Join() {
         </section>
 
         <section className="mt-16">
-          <h2 className="text-[15px] text-bone">Setting it up</h2>
+          <h2 className="text-[15px] text-bone">First, install the agent</h2>
+          <p className="mt-2 max-w-[64ch] text-[14px] leading-relaxed text-slate">
+            It runs on a machine that can reach your camera over the local network and stays on.
+            Pick where yours is going.
+          </p>
+          <div className="mt-6">
+            <SetupChooser />
+          </div>
+        </section>
+
+        <section className="mt-16">
+          <h2 className="text-[15px] text-bone">Then, the same four steps everywhere</h2>
+          <p className="mt-2 max-w-[64ch] text-[14px] leading-relaxed text-slate">
+            Note the order: your camera is tested before you are asked for an email. If it turns
+            out to have no microphone, you will not have signed up for anything.
+          </p>
           <ol className="mt-2">
             {STEPS.map((step, i) => (
               <StepBlock key={step.title} index={i} step={step} />
