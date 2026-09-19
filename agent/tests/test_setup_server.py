@@ -323,3 +323,73 @@ def test_delete_removes_the_camera_and_its_secret(tmp_path):
     assert [c["id"] for c in after["cameras"]] == ["home-1"]
     assert "HOME_2_SECRET" not in after["secrets"]
     assert after["secrets"]["HOME_1_SECRET"] == "a"
+
+
+# --- clip playback on the labelling page --------------------------------
+
+CLIP = bytes(range(256)) * 4   # 1024 distinguishable bytes
+
+
+@pytest.fixture
+def clip_agent(agent):
+    data, live, base = agent
+    (data / "clips" / "home-1").mkdir(parents=True)
+    (data / "clips" / "home-1" / "a.wav").write_bytes(CLIP)
+    (data / "events.jsonl").write_text(
+        json.dumps({"id": "evt-1", "start": 1, "clip": "clips/home-1/a.wav"}) + "\n")
+    return base
+
+
+def fetch_clip(base, range_header=None):
+    import urllib.error, urllib.request
+    req = urllib.request.Request(base + "/api/clip?id=evt-1")
+    if range_header:
+        req.add_header("Range", range_header)
+    try:
+        with urllib.request.urlopen(req, timeout=10) as r:
+            return r.status, r.headers, r.read()
+    except urllib.error.HTTPError as e:
+        return e.code, e.headers, e.read()
+
+
+def test_pages_let_audio_load_from_the_agent(agent):
+    """Without media-src, default-src 'none' blocks <audio> and every clip on
+    the labelling page shows an empty 0:00 / 0:00 player."""
+    import urllib.request
+    _, _, base = agent
+    for page in ("/", "/label"):
+        with urllib.request.urlopen(base + page, timeout=10) as r:
+            assert "media-src 'self'" in r.headers["content-security-policy"]
+
+
+def test_a_whole_clip_advertises_ranges(clip_agent):
+    status, headers, body = fetch_clip(clip_agent)
+    assert status == 200 and body == CLIP
+    assert headers["accept-ranges"] == "bytes"
+    assert headers["cache-control"] == "no-store"
+
+
+@pytest.mark.parametrize("rng, start, end", [
+    ("bytes=0-", 0, 1023),         # what Chrome opens with
+    ("bytes=100-199", 100, 199),   # a seek
+    ("bytes=1000-5000", 1000, 1023),
+    ("bytes=-24", 1000, 1023),     # the final 24 bytes
+])
+def test_a_range_returns_exactly_those_bytes(clip_agent, rng, start, end):
+    status, headers, body = fetch_clip(clip_agent, rng)
+    assert status == 206
+    assert body == CLIP[start : end + 1]
+    assert headers["content-range"] == f"bytes {start}-{end}/1024"
+    assert headers["content-length"] == str(end - start + 1)
+
+
+def test_a_range_past_the_end_is_refused(clip_agent):
+    status, headers, _ = fetch_clip(clip_agent, "bytes=2000-")
+    assert status == 416
+    assert headers["content-range"] == "bytes */1024"
+
+
+@pytest.mark.parametrize("rng", ["bytes=abc-", "bytes=-", "items=0-10"])
+def test_a_range_that_cannot_be_parsed_is_ignored(clip_agent, rng):
+    status, _, body = fetch_clip(clip_agent, rng)
+    assert status == 200 and body == CLIP

@@ -110,13 +110,68 @@ class SetupHandler(BaseHTTPRequestHandler):
         self.send_header("content-length", str(len(body)))
         self.send_header("cache-control", "no-store")
         # No external resources, no framing, no referrer leakage.
+        #
+        # media-src is load-bearing: <audio> is governed by it, and with
+        # default-src 'none' and no media-src the browser refuses to load a
+        # clip and shows an empty player reading 0:00 / 0:00, with the reason
+        # only in the console. The labelling page is useless without it.
         self.send_header("content-security-policy",
                          "default-src 'none'; style-src 'unsafe-inline'; "
-                         "script-src 'unsafe-inline'; connect-src 'self'; img-src 'self' data:")
+                         "script-src 'unsafe-inline'; connect-src 'self'; "
+                         "media-src 'self'; img-src 'self' data:")
         self.send_header("referrer-policy", "no-referrer")
         self.send_header("x-frame-options", "DENY")
         self.end_headers()
         self.wfile.write(body)
+
+    def _send_media(self, body: bytes, ctype: str):
+        """Serve audio with byte-range support.
+
+        Without ranges a clip still plays, but Chrome cannot seek in it:
+        setting currentTime snaps back to 0:00. Scrubbing through a
+        seventy-second clip is most of what labelling is.
+        """
+        total = len(body)
+        start, end = 0, total - 1
+        status = 200
+        rng = (self.headers.get("range") or "").strip().lower()
+        if rng.startswith("bytes="):
+            spec = rng[6:].split(",")[0].strip()
+            first, _, last = spec.partition("-")
+            try:
+                if first:
+                    start = int(first)
+                    if last:
+                        end = min(int(last), total - 1)
+                elif last:
+                    # "bytes=-500" means the final 500 bytes.
+                    start = max(0, total - int(last))
+                else:
+                    raise ValueError(rng)
+                status = 206
+            except ValueError:
+                # A range we cannot parse is ignored, as HTTP asks: send it all.
+                start, end = 0, total - 1
+        if status == 206:
+            if start >= total or start > end:
+                self.send_response(416)
+                self.send_header("content-range", f"bytes */{total}")
+                self.send_header("content-length", "0")
+                self.end_headers()
+                return
+
+        chunk = body[start : end + 1]
+        self.send_response(status)
+        self.send_header("content-type", ctype)
+        self.send_header("accept-ranges", "bytes")
+        if status == 206:
+            self.send_header("content-range", f"bytes {start}-{end}/{total}")
+        self.send_header("content-length", str(len(chunk)))
+        self.send_header("cache-control", "no-store")
+        self.send_header("referrer-policy", "no-referrer")
+        self.send_header("x-frame-options", "DENY")
+        self.end_headers()
+        self.wfile.write(chunk)
 
     def _json(self, obj, status=200, cookie=None):
         self._send(json.dumps(obj).encode(), "application/json", status, cookie=cookie)
@@ -221,7 +276,7 @@ class SetupHandler(BaseHTTPRequestHandler):
             path = labelling.clip_path(self.data_dir, event_id)
             if not path:
                 return self._json({"error": "no clip for that event"}, 404)
-            return self._send(path.read_bytes(), "audio/wav")
+            return self._send_media(path.read_bytes(), "audio/wav")
 
         if route == "/api/elevation":
             q = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
