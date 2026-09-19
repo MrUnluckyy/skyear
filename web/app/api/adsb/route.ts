@@ -8,13 +8,29 @@ import type { Aircraft } from "@/lib/types";
  * enough to earn HTTP 429 during testing, so N map visitors would be an instant
  * ban - and each request would leak that visitor's area of interest. One
  * cached fetch serves everyone.
+ *
+ * The server decides the area, not the browser. When the query string chose
+ * it, alternating two locations missed the cache on every request and sent
+ * each one straight upstream, which is exactly the ban this exists to prevent.
  */
 
 const UPSTREAM = "https://api.adsb.lol/v2/lat/{lat}/lon/{lon}/dist/{nm}";
 const MIN_INTERVAL_MS = 10_000; // never hit upstream faster than this
 const FT_TO_M = 0.3048;
 
-type Cache = { at: number; data: Aircraft[]; key: string };
+/**
+ * What the map covers. adsb.lol caps a query at 250 nm, so a new country is a
+ * new region rather than a wider circle - and each region is one more upstream
+ * request per interval, so add them as sensors arrive there, not before.
+ */
+const REGIONS = [
+  // The centre of Lithuania. Its furthest borders are 101 nm away, so 120 nm
+  // covers the whole country with room to see aircraft coming, and takes in
+  // the Riga and Kaliningrad approaches on the way.
+  { name: "Lithuania", lat: 55.17, lon: 23.89, nm: 120 },
+];
+
+type Cache = { at: number; data: Aircraft[] };
 let cache: Cache | null = null;
 let inflight: Promise<Aircraft[]> | null = null;
 
@@ -50,14 +66,20 @@ function parse(json: unknown): Aircraft[] {
   return out;
 }
 
-export async function GET(request: Request) {
-  const url = new URL(request.url);
-  const lat = Number(url.searchParams.get("lat") ?? 54.65);
-  const lon = Number(url.searchParams.get("lon") ?? 25.34);
-  const nm = Math.min(Number(url.searchParams.get("nm") ?? 25), 50);
-  const key = `${lat.toFixed(2)},${lon.toFixed(2)},${nm}`;
+async function fetchRegion(r: (typeof REGIONS)[number]): Promise<Aircraft[]> {
+  const target = UPSTREAM.replace("{lat}", r.lat.toFixed(4))
+    .replace("{lon}", r.lon.toFixed(4))
+    .replace("{nm}", String(r.nm));
+  const res = await fetch(target, {
+    headers: { "User-Agent": "skyear-web/0.1" },
+    cache: "no-store",
+  });
+  if (!res.ok) throw new Error(`upstream ${res.status}`);
+  return parse(await res.json());
+}
 
-  const fresh = cache && cache.key === key && Date.now() - cache.at < MIN_INTERVAL_MS;
+export async function GET() {
+  const fresh = cache && Date.now() - cache.at < MIN_INTERVAL_MS;
   if (fresh && cache) {
     return NextResponse.json(
       { aircraft: cache.data, cached: true, age_ms: Date.now() - cache.at },
@@ -77,19 +99,13 @@ export async function GET(request: Request) {
 
   // Collapse concurrent misses into a single upstream request.
   if (!inflight) {
-    inflight = (async () => {
-      const target = UPSTREAM.replace("{lat}", lat.toFixed(4))
-        .replace("{lon}", lon.toFixed(4))
-        .replace("{nm}", String(Math.round(nm)));
-      const res = await fetch(target, {
-        headers: { "User-Agent": "skyear-web/0.1" },
-        cache: "no-store",
-      });
-      if (!res.ok) throw new Error(`upstream ${res.status}`);
-      return parse(await res.json());
-    })()
-      .then((data) => {
-        cache = { at: Date.now(), data, key };
+    inflight = Promise.all(REGIONS.map(fetchRegion))
+      .then((lists) => {
+        // Regions overlap at their edges; an aircraft there is one aircraft.
+        const byHex = new Map<string, Aircraft>();
+        for (const a of lists.flat()) byHex.set(a.hex, a);
+        const data = [...byHex.values()];
+        cache = { at: Date.now(), data };
         failures = 0;
         nextAllowedAt = 0;
         return data;

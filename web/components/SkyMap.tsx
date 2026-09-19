@@ -28,7 +28,6 @@ import { DetectionRow, OctaveBars, SensorBeacon } from "./SensorBeacon";
 import SensorPanel from "./SensorPanel";
 import { PeriodicityNote, RotorSignature, SoundProfile, TiltScale } from "./SoundProfile";
 
-/** Vilnius old town. A default centre should be a city, not a contributor's street. */
 /**
  * v6 loads its worker as a separate ES module that does not resolve under
  * Turbopack, and vector tiles are fetched *inside* that worker - so without
@@ -39,7 +38,16 @@ import { PeriodicityNote, RotorSignature, SoundProfile, TiltScale } from "./Soun
  */
 setWorkerUrl("/maplibre-gl-worker.mjs");
 
-const VILNIUS: [number, number] = [25.2797, 54.6872];
+/**
+ * The map opens on the whole country rather than on a sensor. Zoomed onto one
+ * contributor's neighbourhood it read as a Vilnius project, and the aircraft
+ * feed covers all of Lithuania (app/api/adsb/route.ts). Widen this alongside
+ * the feed's regions when sensors arrive in a neighbouring country.
+ */
+const LITHUANIA: [[number, number], [number, number]] = [
+  [20.93, 53.9],
+  [26.84, 56.45],
+];
 
 /**
  * CARTO vector basemaps: modern, keyless, free with attribution.
@@ -155,8 +163,9 @@ export default function SkyMap() {
     const m = new MapLibreMap({
       container: container.current,
       style: STYLES.dark,
-      center: VILNIUS,
-      zoom: 10.2,
+      // Only until the first fit below: the container may not have a size yet.
+      center: [23.89, 55.17],
+      zoom: 6,
       attributionControl: { compact: true },
     });
     // Zoom buttons only where there is room for them. Touch devices pinch, and
@@ -206,35 +215,24 @@ export default function SkyMap() {
     setPoints(next);
   }, []);
 
-  // Frame the sensors that actually exist rather than assuming where they are.
+  // Fit the country once, when the map first has a real size to fit it into.
   const framed = useRef(false);
   useEffect(() => {
     const m = map.current;
-    if (!m || !ready || framed.current || sensors.length === 0) return;
+    if (!m || !ready || framed.current) return;
     framed.current = true;
-    if (sensors.length === 1) {
-      m.easeTo({ center: [sensors[0].lon, sensors[0].lat], zoom: 10.6, duration: 900 });
-      return;
-    }
-    const lons = sensors.map((s) => s.lon);
-    const lats = sensors.map((s) => s.lat);
     // Panels sit beside the map on a desktop and over it on a phone, so the
-    // room to leave differs entirely.
+    // room to leave differs entirely. On a phone the newest-detection sheet
+    // takes up to 62dvh from the bottom, and a country fitted behind it is a
+    // map of Latvia.
     const wide = window.innerWidth >= 768;
-    m.fitBounds(
-      [
-        [Math.min(...lons), Math.min(...lats)],
-        [Math.max(...lons), Math.max(...lats)],
-      ],
-      {
-        padding: wide
-          ? { top: 80, bottom: 80, left: 360, right: 380 }
-          : { top: 96, bottom: 220, left: 32, right: 32 },
-        maxZoom: 11,
-        duration: 900,
-      }
-    );
-  }, [ready, sensors]);
+    m.fitBounds(LITHUANIA, {
+      padding: wide
+        ? { top: 80, bottom: 80, left: 360, right: 380 }
+        : { top: 120, bottom: Math.round(window.innerHeight * 0.62) + 16, left: 24, right: 24 },
+      animate: false,
+    });
+  }, [ready]);
 
   useEffect(() => {
     const m = map.current;
@@ -256,7 +254,7 @@ export default function SkyMap() {
     let alive = true;
     const tick = async () => {
       try {
-        const res = await fetch(`/api/adsb?lat=${VILNIUS[1]}&lon=${VILNIUS[0]}&nm=25`);
+        const res = await fetch("/api/adsb");
         const json = await res.json();
         if (alive && Array.isArray(json.aircraft)) setAircraft(json.aircraft);
       } catch {
