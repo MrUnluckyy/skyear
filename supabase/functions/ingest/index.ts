@@ -45,7 +45,20 @@ Deno.serve(async (req) => {
   const token = auth.startsWith("Bearer ") ? auth.slice(7).trim() : "";
   if (!token) return json({ error: "missing device token" }, 401);
 
-  let body: { events?: AgentEvent[]; passes?: AgentEvent[]; status?: Record<string, AgentEvent> };
+  type CameraDecl = {
+    camera_id?: string;
+    lat?: number;
+    lon?: number;
+    elevation_m?: number;
+    mount_height_m?: number;
+  };
+
+  let body: {
+    events?: AgentEvent[];
+    passes?: AgentEvent[];
+    status?: Record<string, AgentEvent>;
+    cameras?: CameraDecl[];
+  };
   try {
     body = await req.json();
   } catch {
@@ -79,6 +92,57 @@ Deno.serve(async (req) => {
 
   const sensorByCamera = new Map((sensorRows ?? []).map((s) => [s.camera_id, s.id]));
   const skipped: string[] = [];
+  const registered: string[] = [];
+
+  /*
+   * Converge to the camera set the agent says it has.
+   *
+   * Sensor rows used to be created only inside the pair function, at pairing
+   * time. A camera added afterwards had nowhere to land: the wizard saved it,
+   * the agent listened to it and uploaded its events, and this function could
+   * not map the camera_id to a sensor - so every event went into `skipped` and
+   * was discarded. Nothing logged it and nothing surfaced it. Multi-camera was
+   * advertised in config.example.yaml and quietly did not work.
+   *
+   * The agent is the authority on which cameras it has, so the server follows
+   * it. This also repairs setups that are already broken, with no user action.
+   *
+   * Only additions. A camera disappearing from the declaration does not delete
+   * a sensor - that would throw away its history the first time somebody
+   * commented out a line, and removal belongs in the owner's hands, not in a
+   * config file edit.
+   */
+  const declared = Array.isArray(body.cameras) ? body.cameras.slice(0, 16) : [];
+  const missing = declared.filter(
+    (c) =>
+      typeof c.camera_id === "string" &&
+      c.camera_id.length > 0 &&
+      c.camera_id.length <= 64 &&
+      !sensorByCamera.has(c.camera_id) &&
+      typeof c.lat === "number" && Math.abs(c.lat) <= 90 &&
+      typeof c.lon === "number" && Math.abs(c.lon) <= 180,
+  );
+
+  if (missing.length) {
+    const { data: created, error } = await admin
+      .from("sensors")
+      .insert(
+        missing.map((c) => ({
+          device_id: device.id,
+          camera_id: c.camera_id,
+          exact_point: `SRID=4326;POINT(${c.lon} ${c.lat})`,
+          elevation_m: typeof c.elevation_m === "number" ? c.elevation_m : 0,
+          mount_height_m: typeof c.mount_height_m === "number" ? c.mount_height_m : 0,
+        })),
+      )
+      .select("id, camera_id");
+    if (!error) {
+      for (const row of created ?? []) {
+        sensorByCamera.set(row.camera_id, row.id);
+        registered.push(row.camera_id);
+      }
+    }
+  }
 
   const detectionRows = [];
   for (const e of events) {
@@ -218,5 +282,14 @@ Deno.serve(async (req) => {
     .update({ last_seen_at: new Date().toISOString() })
     .eq("id", device.id);
 
-  return json({ ok: true, detections, passes: passCount, live, skipped: skipped.slice(0, 10) });
+  // `registered` and `skipped` both travel back so the agent can log them.
+  // A silent discard is how a second camera streamed into nothing for days.
+  return json({
+    ok: true,
+    detections,
+    passes: passCount,
+    live,
+    registered,
+    skipped: skipped.slice(0, 10),
+  });
 });

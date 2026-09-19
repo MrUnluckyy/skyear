@@ -295,3 +295,31 @@ def test_api_reports_http_failures_rather_than_parse_errors():
     assert "JSON.parse(text)" in page, "must parse defensively, not via r.json()"
     assert "r.status" in page and "url.pathname" in page, "must report status and path"
     assert ".then(r => r.json())" not in page, "no unguarded json() left"
+
+
+# --- camera management ------------------------------------------------
+
+def test_delete_removes_the_camera_and_its_secret(tmp_path):
+    """A removed camera must not leave its password behind on disk."""
+    from skyear import config_store
+
+    config_store.save(tmp_path, {
+        "cameras": [
+            {"id": "home-1", "host": "10.0.0.5", "password_env": "HOME_1_SECRET"},
+            {"id": "home-2", "host": "10.0.0.6", "password_env": "HOME_2_SECRET"},
+        ],
+        "secrets": {"HOME_1_SECRET": "a", "HOME_2_SECRET": "b"},
+    })
+
+    # What the handler does, without standing a server up.
+    stored = config_store.load(tmp_path)
+    cams = stored["cameras"]
+    gone = next(c for c in cams if c["id"] == "home-2")
+    stored["secrets"].pop(gone["password_env"], None)
+    stored["cameras"] = [c for c in cams if c["id"] != "home-2"]
+    config_store.save(tmp_path, stored)
+
+    after = config_store.load(tmp_path)
+    assert [c["id"] for c in after["cameras"]] == ["home-1"]
+    assert "HOME_2_SECRET" not in after["secrets"]
+    assert after["secrets"]["HOME_1_SECRET"] == "a"

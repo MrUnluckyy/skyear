@@ -33,6 +33,15 @@
   .meter i{display:block;height:100%;width:0;background:var(--sodium);transition:width .18s}
   .lvl{display:flex;justify-content:space-between;font:12px ui-monospace,monospace;color:var(--dim);margin-top:6px}
   .steps{display:flex;gap:8px;margin-bottom:24px;font-size:12px;color:var(--dim);flex-wrap:wrap}
+  .cambar{display:flex;align-items:center;gap:10px;margin:-8px 0 20px;flex-wrap:wrap}
+  .cambar-label{font-size:12px;color:var(--dim)}
+  .chip{padding:5px 11px;border-radius:3px;border:1px solid var(--edge);background:transparent;
+        color:var(--dim);font:inherit;font-size:12px;cursor:pointer}
+  .chip[aria-current="true"]{border-color:var(--sodium);color:var(--sodium)}
+  button.link{border:0;background:none;color:var(--sodium);padding:4px 2px;font-size:12px;
+              text-decoration:underline;cursor:pointer}
+  button.danger{border-color:#5a2b2b;color:#e8736b}
+  button.danger:hover:not(:disabled){border-color:#e8736b}
   .steps b{color:var(--sodium);font-weight:500}
   code{font:12.5px ui-monospace,monospace;color:var(--frost)}
   .foot{color:var(--dim);font-size:12px;margin-top:28px;border-top:1px solid var(--edge);padding-top:16px}
@@ -45,6 +54,14 @@
     Your camera details stay on this machine.</p>
 
   <div class="steps" id="steps"></div>
+
+  <!-- Which camera is being edited. Hidden until there is more than one, so a
+       single-camera setup stays exactly as simple as it was. -->
+  <div id="camBar" class="cambar" hidden>
+    <span class="cambar-label">Cameras</span>
+    <span id="camChips"></span>
+    <button id="addCam" type="button" class="link">+ Add another</button>
+  </div>
 
   <fieldset>
     <legend>1 · Your camera</legend>
@@ -69,6 +86,7 @@
         <div>
           <label for="pass">Password</label>
           <input id="pass" type="password" autocomplete="new-password">
+          <div class="hint" id="passHint"></div>
         </div>
       </div>
     </div>
@@ -80,7 +98,10 @@
         of the URL after the last slash. There is no password.</div>
     </div>
 
-    <p style="margin:18px 0 0"><button id="test">Test this camera</button></p>
+    <p style="margin:18px 0 0">
+      <button id="test">Test this camera</button>
+      <button id="removeCam" type="button" class="danger" hidden>Remove this camera</button>
+    </p>
     <div id="testMsg"></div>
   </fieldset>
 
@@ -197,8 +218,25 @@ $("type").onchange = () => {
     : "Find it in your router's device list, or the camera's app.";
 };
 
+/*
+ * Which camera the form is currently editing, and everything the agent knows
+ * about. The wizard used to hardcode id "home-1" for every camera it saved,
+ * which is why a second camera was impossible: saving one replaced the first.
+ */
+let cameras = [];
+let editing = null;         // camera id, or null for a new one
+let alreadyPaired = false;  // a second camera needs no pairing code
+
+function nextCameraId() {
+  for (let n = 1; n < 100; n++) {
+    const id = `home-${n}`;
+    if (!cameras.some((c) => c.id === id)) return id;
+  }
+  return `home-${Date.now()}`;
+}
+
 function cameraFromForm() {
-  const cam = { id: "home-1", type: $("type").value, host: $("host").value.trim() };
+  const cam = { id: editing || nextCameraId(), type: $("type").value, host: $("host").value.trim() };
   if (!isUnifi()) cam.username = $("user").value.trim() || "admin";
   const lat = parseFloat($("lat").value), lon = parseFloat($("lon").value);
   if (!isNaN(lat)) cam.lat = lat;
@@ -282,6 +320,13 @@ $("save").onclick = async () => {
         msg($("saveMsg"),
           "Connected. Restart the agent and your sensor appears on the map within a minute.", true);
       }
+    } else if (alreadyPaired) {
+      // Already connected, so no code is needed. The agent declares its camera
+      // set on every upload and the server creates whatever it does not have,
+      // so a second camera needs a restart and nothing else.
+      msg($("saveMsg"),
+        "Saved. Restart the agent so it starts listening to this camera — it registers itself " +
+        "and appears on the map within a minute.", true);
     } else {
       msg($("saveMsg"), "Camera saved. Add a pairing code to connect it to SkyEar.", true);
     }
@@ -306,25 +351,88 @@ $("save").onclick = async () => {
   btn.disabled = false; btn.textContent = "Save and connect";
 };
 
+function showCamera(cam) {
+  editing = cam ? cam.id : null;
+  $("type").value = (cam && cam.type) || "reolink"; $("type").onchange();
+  $("host").value = (cam && cam.host) || "";
+  $("user").value = (cam && cam.username) || "admin";
+  $("pass").value = "";
+  $("token").value = "";
+  $("lat").value = cam && cam.lat != null ? cam.lat : "";
+  $("lon").value = cam && cam.lon != null ? cam.lon : "";
+  $("elev").value = cam && cam.elevation_m != null ? cam.elevation_m : "";
+  $("mount").value = cam && cam.mount_height_m != null ? cam.mount_height_m : 4;
+  $("testMsg").textContent = "";
+  // A stored camera's password is never sent back to the browser, so the field
+  // is blank. Say what blank means here rather than letting it read as lost.
+  $("passHint").textContent = cam
+    ? "Leave blank to keep the stored password, or type a new one to replace it."
+    : "";
+  $("removeCam").hidden = !cam;
+  renderChips();
+}
+
+function renderChips() {
+  const bar = $("camBar");
+  bar.hidden = cameras.length < 2 && editing !== null;
+  const wrap = $("camChips");
+  wrap.innerHTML = "";
+  for (const c of cameras) {
+    const b = document.createElement("button");
+    b.type = "button";
+    b.className = "chip";
+    b.textContent = c.id;
+    b.setAttribute("aria-current", String(c.id === editing));
+    b.onclick = () => showCamera(c);
+    wrap.appendChild(b);
+  }
+  if (editing === null) {
+    const b = document.createElement("button");
+    b.type = "button";
+    b.className = "chip";
+    b.textContent = "new camera";
+    b.setAttribute("aria-current", "true");
+    wrap.appendChild(b);
+  }
+}
+
+$("addCam").onclick = () => {
+  showCamera(null);
+  $("host").focus();
+};
+
+$("removeCam").onclick = async () => {
+  if (!editing) return;
+  const btn = $("removeCam");
+  btn.disabled = true;
+  const r = await api("api/camera/delete", {
+    method: "POST", headers: { "content-type": "application/json" },
+    body: JSON.stringify({ id: editing }),
+  });
+  btn.disabled = false;
+  if (r.error) return msg($("testMsg"), r.error, false);
+  msg($("saveMsg"),
+      `${r.removed} removed. Restart the agent to stop listening to it. ` +
+      `It stays on the map until you remove it there too.`, true);
+  await load();
+};
+
 async function load() {
   try {
     const s = await api("api/state");
     if (s.error) return;
+    cameras = s.cameras || [];
+    alreadyPaired = !!s.paired;
     $("steps").innerHTML = [
-      s.configured ? "<b>camera set</b>" : "camera",
+      cameras.length
+        ? `<b>${cameras.length} camera${cameras.length > 1 ? "s" : ""}</b>`
+        : "camera",
       s.paired ? "<b>connected</b>" : "connect",
       `agent v${s.version}`,
     ].join(" · ");
-    const cam = (s.cameras || [])[0];
-    if (cam) {
-      $("type").value = cam.type || "reolink"; $("type").onchange();
-      $("host").value = cam.host || "";
-      if (cam.username) $("user").value = cam.username;
-      if (cam.lat != null) $("lat").value = cam.lat;
-      if (cam.lon != null) $("lon").value = cam.lon;
-      if (cam.elevation_m != null) $("elev").value = cam.elevation_m;
-      if (cam.mount_height_m != null) $("mount").value = cam.mount_height_m;
-    }
+    // Keep editing the same camera across a reload if it still exists.
+    const keep = cameras.find((c) => c.id === editing);
+    showCamera(keep || cameras[0] || null);
   } catch {}
 }
 

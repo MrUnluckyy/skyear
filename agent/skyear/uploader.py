@@ -120,7 +120,7 @@ class Outbox:
 class Uploader:
     def __init__(self, base_url: str, token: str, data_dir: Path,
                  interval_s: float = 10.0, max_backoff_s: float = 600.0,
-                 live: dict | None = None):
+                 live: dict | None = None, cameras: list[dict] | None = None):
         self.url = f"{base_url.rstrip('/')}/functions/v1/ingest"
         self.token = token
         self.state_path = data_dir / "upload_state.json"
@@ -129,6 +129,12 @@ class Uploader:
         # Live per-camera state, so the map can show what is being heard now
         # rather than only what finished being heard.
         self.live = live if live is not None else {}
+        # The camera set this agent actually has, declared to the server so it
+        # can converge. Before this, sensor rows were created only inside the
+        # pair function, so a camera added after pairing had nowhere to land:
+        # its events uploaded, the server could not map camera_id to a sensor,
+        # and dropped every one of them without telling anybody.
+        self.cameras = cameras or []
         state = self._load_state()
         self.events = Outbox(data_dir / "events.jsonl", state.get("events_offset", 0))
         self.passes = Outbox(data_dir / "passes.jsonl", state.get("passes_offset", 0))
@@ -160,12 +166,35 @@ class Uploader:
         if not events and not passes and not status:
             return None
 
-        result = _post(self.url, {"events": events, "passes": passes, "status": status},
-                       token=self.token)
+        payload = {"events": events, "passes": passes, "status": status}
+        if self.cameras:
+            payload["cameras"] = [
+                {
+                    "camera_id": c["id"],
+                    "lat": coarse(float(c["lat"])),
+                    "lon": coarse(float(c["lon"])),
+                    "elevation_m": float(c.get("elevation_m", 0)),
+                    "mount_height_m": float(c.get("mount_height_m", 0)),
+                }
+                for c in self.cameras
+                if c.get("id") and c.get("lat") is not None and c.get("lon") is not None
+            ]
+
+        result = _post(self.url, payload, token=self.token)
         self.events.offset, self.passes.offset = ev_next, pa_next
         self._save_state()
         if events or passes:
             log.info("uploaded %d event(s), %d pass(es)", len(events), len(passes))
+
+        # The server tells us what it threw away. Not logging this is how a
+        # second camera could stream into a black hole for days.
+        for camera_id in (result or {}).get("registered") or []:
+            log.info("camera %r registered with the cloud - it will appear on the map",
+                     camera_id)
+        dropped = (result or {}).get("skipped") or []
+        if dropped:
+            log.warning("the server discarded %d event(s) it could not place: %s",
+                        len(dropped), ", ".join(str(d) for d in dropped[:5]))
         return result
 
     def run(self, stop: threading.Event) -> None:

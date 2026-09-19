@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import subprocess
 import threading
 import urllib.parse
@@ -231,6 +232,9 @@ class SetupHandler(BaseHTTPRequestHandler):
             secret = body.get("secret", "")
             if not cam.get("id") or cam.get("lat") is None or cam.get("lon") is None:
                 return self._json({"error": "camera id and position are required"}, 400)
+            if not re.fullmatch(r"[a-z0-9][a-z0-9-]{0,31}", cam["id"]):
+                return self._json({"error": "camera id must be lowercase letters, "
+                                            "digits and hyphens"}, 400)
             env_name = f"{cam['id'].upper().replace('-', '_')}_SECRET"
             if cam.get("type") == "ubiquiti" or cam.get("url_env"):
                 cam["password_env"] = env_name
@@ -239,13 +243,44 @@ class SetupHandler(BaseHTTPRequestHandler):
             stored = config_store.load(self.data_dir)
             others = [c for c in stored.get("cameras", []) if c["id"] != cam["id"]]
             stored["cameras"] = others + [cam]
-            stored.setdefault("secrets", {})[env_name] = secret
+            secrets = stored.setdefault("secrets", {})
+            # An empty field means "keep what is stored", not "erase it". The
+            # password is never sent back to the browser, so editing any other
+            # setting on a saved camera leaves the field blank - and writing
+            # that through would silently break a working camera.
+            if secret or env_name not in secrets:
+                secrets[env_name] = secret
             if body.get("cloud_url"):
                 stored.setdefault("cloud", {})["url"] = body["cloud_url"]
             config_store.save(self.data_dir, stored)
             token = config_store.setup_token(self.data_dir)
             return self._json({"ok": True, "restart_required": True, "setup_token": token},
                               cookie=token)
+
+        if route == "/api/camera/delete":
+            """Remove a camera and the secret that belongs to it.
+
+            Without this, a camera added by mistake - a typo'd address, a model
+            that turned out to have no microphone - could only be removed by
+            editing JSON inside the container.
+            """
+            cam_id = (body.get("id") or "").strip()
+            if not cam_id:
+                return self._json({"error": "camera id required"}, 400)
+            stored = config_store.load(self.data_dir)
+            cams = stored.get("cameras", [])
+            remaining = [c for c in cams if c.get("id") != cam_id]
+            if len(remaining) == len(cams):
+                return self._json({"error": f"no camera called {cam_id}"}, 404)
+            # Drop the orphaned secret too, so a removed camera leaves no
+            # password behind on disk.
+            gone = next(c for c in cams if c.get("id") == cam_id)
+            env_name = gone.get("password_env")
+            if env_name:
+                stored.get("secrets", {}).pop(env_name, None)
+            stored["cameras"] = remaining
+            config_store.save(self.data_dir, stored)
+            return self._json({"ok": True, "removed": cam_id, "remaining": len(remaining)})
 
         if route == "/api/pair":
             stored = config_store.load(self.data_dir)

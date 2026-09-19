@@ -215,7 +215,7 @@ def make_uploader(cfg, out_dir: Path):
         log.error("%s is unreadable; re-pair with --pair CODE", path)
         return None
     return Uploader(url, token, out_dir, interval_s=cloud.get("upload_interval_s", 10),
-                    live=LIVE)
+                    live=LIVE, cameras=cfg.get("cameras") or [])
 
 
 def run_pair(cfg, cams, out_dir: Path, code: str):
