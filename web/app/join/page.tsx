@@ -5,7 +5,7 @@ import SetupChooser from "@/components/SetupChooser";
 export const metadata: Metadata = {
   title: "Become a sensor · SkyEar",
   description:
-    "Step-by-step setup for turning a security camera you already own into an acoustic sensor for aircraft over Lithuania.",
+    "Step-by-step setup for turning a security camera you already own into an acoustic sensor for aircraft, starting in Lithuania.",
 };
 
 type Where = "browser" | "machine";
