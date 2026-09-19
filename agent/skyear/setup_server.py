@@ -21,7 +21,7 @@ import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
-from . import DEFAULT_CLOUD_URL, __version__, config_store
+from . import DEFAULT_CLOUD_URL, __version__, config_store, labelling
 from .audio import build_url, redact_text
 from .uploader import CloudError, coarse, pair
 
@@ -93,6 +93,7 @@ class SetupHandler(BaseHTTPRequestHandler):
     data_dir: Path
     live: dict
     page: str
+    label_page: str
 
     def log_message(self, fmt, *args):
         log.debug(fmt, *args)
@@ -196,6 +197,32 @@ class SetupHandler(BaseHTTPRequestHandler):
             })
         if route == "/api/level":
             return self._json({"live": self.live})
+        if route in ("/label", "/label/"):
+            return self._send(self.label_page.encode(), "text/html; charset=utf-8")
+
+        if route == "/api/labels":
+            """The labelling queue: events that have a clip and no label yet.
+
+            Unmatched sounds come first. An event ADS-B already explains is
+            worth far less as training data than one nothing accounts for,
+            which is the class a drone would land in.
+            """
+            if not self._authorised():
+                return self._json({"error": "locked"}, 403)
+            return self._json(labelling.queue(self.data_dir))
+
+        if route == "/api/clip":
+            # Audio of private property. Never served without the token, even
+            # though the other reads here are deliberately open.
+            if not self._authorised():
+                return self._json({"error": "locked"}, 403)
+            q = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
+            event_id = (q.get("id") or [""])[0]
+            path = labelling.clip_path(self.data_dir, event_id)
+            if not path:
+                return self._json({"error": "no clip for that event"}, 404)
+            return self._send(path.read_bytes(), "audio/wav")
+
         if route == "/api/elevation":
             q = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
             try:
@@ -256,6 +283,22 @@ class SetupHandler(BaseHTTPRequestHandler):
             token = config_store.setup_token(self.data_dir)
             return self._json({"ok": True, "restart_required": True, "setup_token": token},
                               cookie=token)
+
+        if route == "/api/label":
+            """Record one human judgement about one event.
+
+            Labels live beside the events they describe, on this machine. The
+            audio never leaves; only the label does, and only later and only
+            if the owner chooses.
+            """
+            event_id = (body.get("event_id") or "").strip()
+            label = (body.get("label") or "").strip()
+            if not event_id or not label:
+                return self._json({"error": "event_id and label required"}, 400)
+            if label not in labelling.LABELS:
+                return self._json({"error": f"unknown label {label!r}"}, 400)
+            n = labelling.record(self.data_dir, event_id, label, body.get("note") or "")
+            return self._json({"ok": True, "labelled": n})
 
         if route == "/api/camera/delete":
             """Remove a camera and the secret that belongs to it.
@@ -326,8 +369,10 @@ def lan_address() -> str | None:
 
 def serve(data_dir: Path, live: dict, port: int = 8088, host: str = "0.0.0.0") -> ThreadingHTTPServer:
     page = (Path(__file__).parent / "setup.html").read_text()
+    label_page = (Path(__file__).parent / "label.html").read_text()
     handler = type("Bound", (SetupHandler,),
-                   {"data_dir": Path(data_dir), "live": live, "page": page})
+                   {"data_dir": Path(data_dir), "live": live, "page": page,
+                    "label_page": label_page})
     httpd = ThreadingHTTPServer((host, port), handler)
     threading.Thread(target=httpd.serve_forever, daemon=True, name="setup").start()
     ip = lan_address()

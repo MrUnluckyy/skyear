@@ -1,0 +1,211 @@
+<!doctype html>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Label sounds · SkyEar</title>
+<style>
+  :root{--deep:#080d12;--night:#0d141a;--edge:#22303b;--sodium:#f0a94c;--bone:#e6edf2;
+        --dim:#7d95a4;--dimmer:#55697a;--signal:#57d1a8;--noise:#7c7a9e;--frost:#c9e2f0}
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--deep);color:var(--bone);
+       font:15px/1.55 -apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif}
+  .wrap{max-width:680px;margin:0 auto;padding:28px 20px 80px}
+  h1{font-size:20px;font-weight:500;margin:0}
+  .sub{color:var(--dim);font-size:13px;margin:4px 0 0}
+  .bar{height:4px;background:var(--edge);border-radius:2px;margin:18px 0 24px;overflow:hidden}
+  .bar i{display:block;height:100%;background:var(--sodium);transition:width .2s}
+  .card{border:1px solid var(--edge);background:var(--night);padding:20px}
+  .facts{display:grid;grid-template-columns:1fr auto;gap:3px 14px;
+         font:12.5px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace;margin:14px 0 0}
+  .facts dt{color:var(--dimmer)}
+  .facts dd{margin:0;text-align:right}
+  .oct{display:flex;align-items:flex-end;gap:3px;height:46px;margin:16px 0 0}
+  .oct i{flex:1;border-radius:1px;min-height:2px}
+  .matched{border-left:2px solid var(--signal);padding-left:10px;margin:14px 0 0;font-size:13px}
+  .unmatched{border-left:2px solid var(--sodium);padding-left:10px;margin:14px 0 0;font-size:13px;color:var(--sodium)}
+  audio{width:100%;margin:16px 0 0;filter:invert(1) hue-rotate(180deg) saturate(.4)}
+  .keys{display:grid;grid-template-columns:repeat(auto-fill,minmax(168px,1fr));gap:8px;margin:20px 0 0}
+  .key{display:flex;align-items:center;gap:9px;padding:10px 12px;border:1px solid var(--edge);
+       background:transparent;color:var(--bone);font:inherit;font-size:13.5px;cursor:pointer;
+       text-align:left;border-radius:3px}
+  .key:hover{border-color:var(--sodium);color:var(--sodium)}
+  .key b{display:inline-flex;align-items:center;justify-content:center;width:20px;height:20px;
+         border:1px solid var(--edge);border-radius:3px;font:11px/1 ui-monospace,monospace;
+         color:var(--dim);flex:none}
+  .row{display:flex;gap:14px;align-items:center;margin:18px 0 0;font-size:13px}
+  .row button{background:none;border:0;color:var(--dim);font:inherit;cursor:pointer;
+              text-decoration:underline;padding:0}
+  .row button:hover{color:var(--sodium)}
+  .tally{margin:26px 0 0;font-size:12px;color:var(--dimmer);line-height:1.9}
+  .tally span{display:inline-block;margin-right:14px}
+  .done{text-align:center;padding:60px 20px;color:var(--dim)}
+  .hint{color:var(--dimmer);font-size:12px;margin:10px 0 0}
+</style>
+
+<div class="wrap">
+  <h1>Label what you hear</h1>
+  <p class="sub">Clips stay on this machine. Only the label is stored, next to them.</p>
+  <div class="bar"><i id="prog" style="width:0"></i></div>
+  <div id="main"></div>
+  <div class="tally" id="tally"></div>
+</div>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const q = new URLSearchParams(location.search);
+
+/*
+ * This page is served at /label, not at the root, so the base for relative
+ * API paths is its parent. Appending a slash the way the setup page does
+ * would nest every call under /label/api/... and 404. The regex also has to
+ * survive Home Assistant's ingress prefix, where the real base is
+ * /api/hassio_ingress/<token>/ and dropping a segment loses the token.
+ */
+function apiBase() {
+  let b = document.baseURI.split("?")[0].split("#")[0];
+  b = b.replace(/\/label\/?$/, "/");
+  return b.endsWith("/") ? b : b + "/";
+}
+
+const api = async (p, opts) => {
+  const url = new URL(p, apiBase());
+  if (q.get("t")) url.searchParams.set("t", q.get("t"));
+  let r;
+  try { r = await fetch(url, { credentials: "same-origin", ...(opts || {}) }); }
+  catch (e) { return { error: `Could not reach the agent (${e.message})` }; }
+  const text = await r.text();
+  try { return JSON.parse(text); }
+  catch { return { error: `${r.status} ${r.statusText || "error"} from ${url.pathname}` }; }
+};
+
+let state = { items: [], labels: {}, counts: {}, i: 0, total: 0, labelled: 0 };
+const order = ["aircraft","propeller","drone","scooter","vehicle","machinery","wind","rain","voice","other","unclear"];
+const hotkey = { "1":"aircraft","2":"propeller","3":"drone","4":"scooter","5":"vehicle",
+                 "6":"machinery","7":"wind","8":"rain","9":"voice","0":"other","u":"unclear" };
+
+function octaveBars(oct) {
+  if (!oct) return "";
+  const bands = ["50-100","100-200","200-400","400-800","800-1600","1600-3200"];
+  const v = bands.map((b) => (oct[b] ?? -90));
+  const max = Math.max(...v), min = Math.min(...v), span = Math.max(max - min, 1);
+  return `<div class="oct" title="50 Hz to 3.2 kHz">` + v.map((x, i) => {
+    const h = Math.max(4, ((x - min) / span) * 100);
+    const c = i < 2 ? "var(--noise)" : "var(--frost)";
+    return `<i style="height:${h}%;background:${c};opacity:${0.45 + (h/100)*0.55}"></i>`;
+  }).join("") + `</div>`;
+}
+
+function render() {
+  const it = state.items[state.i];
+  $("prog").style.width = `${state.total ? (state.labelled / state.total) * 100 : 0}%`;
+
+  $("tally").innerHTML = order
+    .filter((k) => state.counts[k])
+    .map((k) => `<span>${state.labels[k]}: <b style="color:var(--dim)">${state.counts[k]}</b></span>`)
+    .join("") || `<span>Nothing labelled yet.</span>`;
+
+  if (!it) {
+    $("main").innerHTML = `<div class="done"><p>Nothing left in the queue.</p>
+      <p class="hint">New sounds appear here as they are recorded.</p></div>`;
+    return;
+  }
+
+  const when = it.start ? new Date(it.start * 1000).toLocaleString() : "unknown time";
+  const f = (v, n, unit) => (v == null ? "—" : `${Number(v).toFixed(n)}${unit}`);
+
+  $("main").innerHTML = `
+    <div class="card">
+      <div style="display:flex;justify-content:space-between;align-items:baseline;gap:12px">
+        <strong style="font-weight:500">${when}</strong>
+        <span style="color:var(--dimmer);font:12px ui-monospace,monospace">${state.i + 1} of ${state.items.length}</span>
+      </div>
+
+      <audio id="au" controls autoplay preload="auto"></audio>
+
+      ${octaveBars(it.octave_db)}
+
+      <dl class="facts">
+        <dt>Lasted</dt><dd>${f(it.duration_s, 0, " s")}${it.truncated ? " (cut off)" : ""}</dd>
+        <dt>Above background</dt><dd>${f(it.snr_db, 0, " dB")}</dd>
+        <dt>Strongest frequency</dt><dd>${f(it.dominant_hz, 0, " Hz")}</dd>
+        <dt>Low-frequency tilt</dt><dd>${f(it.low_tilt_db, 0, " dB")}${it.likely_wind ? " · wind-like" : ""}</dd>
+        <dt>Harmonics</dt><dd>${it.n_harmonics ?? "—"}${it.n_harmonics >= 4 ? ` at ${f(it.comb_f0_hz, 0, " Hz")}` : ""}</dd>
+      </dl>
+
+      ${it.match_flight
+        ? `<p class="matched">ADS-B: <b>${it.match_flight}</b>${it.match_type ? " · " + it.match_type : ""}${
+             it.match_slant_m ? " · " + (it.match_slant_m / 1000).toFixed(1) + " km" : ""}
+           <br><span style="color:var(--dimmer)">An aircraft was overhead. Trust your ears over this — the match may be coincidence.</span></p>`
+        : `<p class="unmatched">Nothing with a transponder was overhead.</p>`}
+
+      <div class="keys">
+        ${order.map((k, n) => {
+          const key = Object.keys(hotkey).find((h) => hotkey[h] === k) || "";
+          return `<button class="key" data-label="${k}"><b>${key}</b>${state.labels[k]}</button>`;
+        }).join("")}
+      </div>
+
+      <div class="row">
+        <button id="replay">Replay (space)</button>
+        <button id="skip">Skip (→)</button>
+        <button id="back" ${state.i === 0 ? 'disabled style="opacity:.4"' : ""}>Back (←)</button>
+      </div>
+      <p class="hint">Press a number to label and move on. If you are unsure, press u — a wrong
+        label is worse than no label.</p>
+    </div>`;
+
+  const au = $("au");
+  const url = new URL("api/clip", apiBase());
+  url.searchParams.set("id", it.event_id);
+  if (q.get("t")) url.searchParams.set("t", q.get("t"));
+  au.src = url.toString();
+
+  document.querySelectorAll(".key").forEach((b) => {
+    b.onclick = () => label(b.dataset.label);
+  });
+  $("replay").onclick = () => { au.currentTime = 0; au.play(); };
+  $("skip").onclick = () => { state.i++; render(); };
+  $("back").onclick = () => { if (state.i > 0) { state.i--; render(); } };
+}
+
+async function label(name) {
+  const it = state.items[state.i];
+  if (!it) return;
+  // Advance immediately. Waiting on the round trip makes labelling 449 clips
+  // feel like work; the write is append-only and effectively cannot fail.
+  const wasUnlabelled = !it.label;
+  it.label = name;
+  state.counts[name] = (state.counts[name] || 0) + 1;
+  if (wasUnlabelled) state.labelled++;
+  state.i++;
+  render();
+  const r = await api("api/label", {
+    method: "POST", headers: { "content-type": "application/json" },
+    body: JSON.stringify({ event_id: it.event_id, label: name }),
+  });
+  if (r.error) console.error("label failed", r.error);
+}
+
+document.addEventListener("keydown", (e) => {
+  if (e.target.tagName === "INPUT" || e.metaKey || e.ctrlKey) return;
+  if (hotkey[e.key]) { e.preventDefault(); label(hotkey[e.key]); return; }
+  if (e.key === " ") { e.preventDefault(); const a = $("au"); if (a) { a.currentTime = 0; a.play(); } }
+  if (e.key === "ArrowRight") { e.preventDefault(); state.i++; render(); }
+  if (e.key === "ArrowLeft" && state.i > 0) { e.preventDefault(); state.i--; render(); }
+});
+
+(async function start() {
+  const d = await api("api/labels");
+  if (d.error) {
+    $("main").innerHTML = `<div class="card" style="border-color:#5a2b2b">
+      <p>${d.error}</p><p class="hint">If this says locked, open the setup page first — it sets
+      the cookie this page needs.</p></div>`;
+    return;
+  }
+  state.labels = d.labels;
+  state.counts = d.counts || {};
+  state.total = d.total;
+  state.labelled = d.labelled;
+  state.items = d.items.filter((i) => !i.label);
+  render();
+})();
+</script>

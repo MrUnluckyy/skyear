@@ -41,6 +41,7 @@
   button.link{border:0;background:none;color:var(--sodium);padding:4px 2px;font-size:12px;
               text-decoration:underline;cursor:pointer}
   button.danger{border-color:#5a2b2b;color:#e8736b}
+  a{color:var(--sodium)}
   button.danger:hover:not(:disabled){border-color:#e8736b}
   .steps b{color:var(--sodium);font-weight:500}
   code{font:12.5px ui-monospace,monospace;color:var(--frost)}
@@ -138,6 +139,14 @@
       <button class="primary" id="save">Save and connect</button>
     </p>
     <div id="saveMsg"></div>
+  </fieldset>
+
+  <fieldset>
+    <legend>Teach it</legend>
+    <p class="hint" style="margin:0 0 12px">Recorded sounds are kept on this machine for
+      two weeks. Listening to them and saying what they were is how this gets better at
+      telling a drone from a lorry — and it is the one part no algorithm can do for us.</p>
+    <p style="margin:0"><a id="labelLink" href="label">Label what it has heard →</a></p>
   </fieldset>
 
   <fieldset>
