@@ -1,6 +1,12 @@
 # SkyEar web
 
-Deployed at [skyear.vercel.app](https://skyear.vercel.app) (Vercel project `skyear`, region `fra1`).
+Deployed at [skyear.lt](https://skyear.lt) (Vercel project `skyear`, region `fra1`).
+`skyear.vercel.app` still resolves and is kept as a fallback.
+
+**The project's Root Directory must be `web`.** Without it, git-triggered builds run
+from the repo root, fail with "Couldn't find any `pages` or `app` directory", and every
+push leaves a failed production deployment behind - which among other things blocks
+attaching a domain.
 
 Auth redirect URLs must list every origin the app is served from - the
 production domain and `http://localhost:3001/**` for development. A magic

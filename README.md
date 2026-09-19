@@ -1,6 +1,6 @@
 # SkyEar
 
-**Live: [skyear.vercel.app](https://skyear.vercel.app)**
+**Live: [skyear.lt](https://skyear.lt)**
 
 Security cameras already have microphones. SkyEar listens to them, and matches
 what it hears against live aircraft positions — so every detection checks
@@ -36,7 +36,7 @@ supabase/    Postgres schema, row-level security, Edge Functions.
 
 ## Run a sensor
 
-**[Follow the setup guide](https://skyear.vercel.app/join)** — it asks where you
+**[Follow the setup guide](https://skyear.lt/join)** — it asks where you
 are installing and shows only the steps for that. Nothing below is needed if you
 use it.
 

@@ -14,7 +14,7 @@ Both matter the moment SkyEar is posted anywhere public:
   email for a sign-in link" and then wait for an email that was never sent.
   No error reaches the browser and nothing obvious appears in the logs.
 - **A shared sender lands in spam.** The address has no SPF or DKIM alignment
-  with skyear.vercel.app, and it is shared with every other project using the
+  with skyear.lt, and it is shared with every other project using the
   default. Its reputation is not yours and you cannot improve it.
 
 Two accounts have ever signed up here, so this path has never carried load.
@@ -100,8 +100,10 @@ Dashboard → **Authentication → URL Configuration**. The magic link returns t
 `emailRedirectTo`, which the login page sets to `<origin>/auth/callback`. Both
 of these need to be present or the link fails after a successful email:
 
-- Site URL: `https://skyear.vercel.app`
-- Redirect URLs: `https://skyear.vercel.app/auth/callback`
+- Site URL: `https://skyear.lt`
+- Redirect URLs: `https://skyear.lt/auth/callback`
+- Keep `https://skyear.vercel.app/auth/callback` too while that host still resolves,
+  or a link opened from an older tab breaks
 
 Add `http://localhost:3000/auth/callback` too if you sign in while developing.
 
