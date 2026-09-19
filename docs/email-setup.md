@@ -53,16 +53,38 @@ Wait for the provider to show the domain verified before going further.
 
 ### 3. Point Supabase at it
 
-Dashboard → **Project Settings → Authentication → SMTP Settings**:
+Dashboard → **Project Settings → Authentication → SMTP Settings**. On some
+dashboard versions this lives at **Authentication → Settings → SMTP** instead.
 
-- Enable custom SMTP
-- Host, port, username, password from the provider
-- **Sender email**: something at the verified domain, e.g. `no-reply@…`
-- **Sender name**: `SkyEar`
+Enable custom SMTP and fill in the provider's values. For Resend:
 
-Then Dashboard → **Authentication → Rate Limits** and raise the email limit,
-which stays at the built-in default until you change it. The built-in cap is
-not lifted automatically when custom SMTP is enabled.
+| Field | Value |
+|---|---|
+| Host | `smtp.resend.com` |
+| Port | `465` (or `587` for STARTTLS) |
+| Username | `resend` — the literal word, not an email address |
+| Password | the API key, the `re_…` string |
+| Sender email | an address at the verified domain |
+| Sender name | `SkyEar` |
+
+**The API key is the SMTP password.** This is the step people get wrong,
+because Resend calls it an API key everywhere else and the username is not
+what you would guess.
+
+Create the key with **sending access only**, not full access, and scope it to
+the verified domain if the provider allows it.
+
+**The key belongs in the Supabase dashboard and nowhere else.** Not in this
+repo, not in `web/.env.local`, not in Vercel's environment. No part of the web
+app sends mail - Supabase Auth does - so putting it anywhere else spreads the
+secret without enabling anything.
+
+Then Dashboard → **Authentication → Rate Limits** and raise the email limit.
+
+This is a separate setting and it is the entire reason for the exercise. The
+cap is **not** lifted when custom SMTP is enabled, so it is perfectly possible
+to configure everything above correctly, send a successful test, and still have
+most people get nothing on launch day.
 
 ### 4. Set the templates
 
