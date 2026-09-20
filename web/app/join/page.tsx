@@ -3,7 +3,9 @@ import type { Metadata } from "next";
 import SetupChooser from "@/components/SetupChooser";
 
 export const metadata: Metadata = {
-  title: "Become a sensor · SkyEar",
+  // The root layout's template appends " · SkyEar"; naming it here too gave
+  // tabs reading "Become a sensor · SkyEar · SkyEar".
+  title: "Become a sensor",
   description:
     "Step-by-step setup for turning a security camera you already own into an acoustic sensor for aircraft, starting in Lithuania.",
 };
