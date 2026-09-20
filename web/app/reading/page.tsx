@@ -55,6 +55,9 @@ export default function Reading() {
           <Link href="/join" className="text-slate hover:text-sodium">
             Become a sensor
           </Link>
+          <Link href="/privacy" className="text-slate hover:text-sodium">
+            Privacy
+          </Link>
         </nav>
 
         <h1 className="mt-8 text-[30px] leading-tight tracking-tight">Reading the map</h1>
