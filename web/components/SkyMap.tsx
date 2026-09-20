@@ -493,7 +493,7 @@ export default function SkyMap() {
             <div className="min-w-0">
               <h1 className="text-[17px] font-medium tracking-tight text-bone">SkyEar</h1>
               <p className="mt-0.5 truncate text-[12px] text-slate">
-                Cameras as ears · Lithuania first
+                Cameras as ears · Lithuania
               </p>
             </div>
             <div className="flex shrink-0 items-center gap-2">
