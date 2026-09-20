@@ -88,17 +88,31 @@ most people get nothing on launch day.
 
 ### 4. Set the templates
 
-Dashboard → **Authentication → Emails → Magic Link**.
+Dashboard → **Authentication → Emails**. There are two to paste, not one:
 
-Paste `supabase/email-templates/magic-link.html`, and set the subject to:
+| Template | File | Subject |
+|---|---|---|
+| Confirm signup | `supabase/email-templates/confirm-signup.html` | `Confirm your email for SkyEar` |
+| Magic Link | `supabase/email-templates/magic-link.html` | `Your SkyEar sign-in link` |
 
-    Your SkyEar sign-in link
+**Confirm signup is the one new people actually receive.** The login page
+calls `signInWithOtp`, which creates the account when the address is unknown,
+and Supabase sends the signup confirmation rather than the magic link on that
+first send. Setting only Magic Link leaves every first-time contributor with
+the stock Supabase email.
 
 ### 5. Check the redirect allow list
 
 Dashboard → **Authentication → URL Configuration**. The magic link returns to
 `emailRedirectTo`, which the login page sets to `<origin>/auth/callback`. Both
-of these need to be present or the link fails after a successful email:
+of these need to be present or the link fails after a successful email.
+
+When the callback address is missing from the list, Supabase does not error —
+it quietly sends people to the Site URL instead, so the link lands on
+`https://skyear.lt/?code=…`, the map loads signed out, and the code sits
+unused in the address bar. `middleware.ts` now catches that case and forwards
+the code to the callback, so sign-in works either way, but the allow list is
+still the thing to fix:
 
 - Site URL: `https://skyear.lt`
 - Redirect URLs: `https://skyear.lt/auth/callback`
