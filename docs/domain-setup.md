@@ -15,6 +15,15 @@ Both hostnames are already attached to the Vercel project. They need DNS:
 | A | `@` (or `skyear.lt`) | `76.76.21.21` |
 | A | `www` | `76.76.21.21` |
 
+As of 2026-09-20 the domain is registered at Hostinger and its zone is served
+by Hostinger's parking nameservers (`helios.dns-parking.com`,
+`aster.dns-parking.com`). The apex still answers `2.57.91.91`, which is
+Hostinger's "Parked Domain name" page — so skyear.lt resolves and serves 200
+while showing nothing of this project. Only the apex A record has to change:
+`www` is already a `CNAME` to the apex and follows it. If hPanel shows the
+domain attached to a Hostinger website or parking page, detach that first, or
+it will keep rewriting the record.
+
 Vercel checks continuously and issues the TLS certificate itself once the
 records resolve. Nothing to click.
 
