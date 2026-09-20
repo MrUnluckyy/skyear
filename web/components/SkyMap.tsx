@@ -4,7 +4,6 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Map as MapLibreMap, NavigationControl, setWorkerUrl } from "maplibre-gl";
 import type { GeoJSONSource } from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
-import { createClient } from "@/lib/supabase";
 import {
   PHASE_LABEL,
   PHASE_RANK,
@@ -72,6 +71,17 @@ const LATEST_OPEN = "skyear:latest-open";
 
 const FROST = "#c9e2f0";
 const GROUND = "#55697a";
+
+/** What /api/map and /api/map/live return; both are cached at the edge. */
+type MapPayload = {
+  sensors?: PublicSensor[];
+  detections?: PublicDetection[];
+  stats?: SensorStats[];
+  types?: TypeStats[];
+  spectrum?: SpectrumBaseline[];
+  conditions?: SensorConditions[];
+  error?: string | null;
+};
 
 function aircraftFeatures(list: Aircraft[]) {
   return {
@@ -187,7 +197,10 @@ export default function SkyMap() {
       // Only until the first fit below: the container may not have a size yet.
       center: [23.89, 55.17],
       zoom: 6,
-      attributionControl: { compact: true },
+      attributionControl: {
+        compact: true,
+        customAttribution: 'Aircraft <a href="https://adsb.lol" target="_blank" rel="noreferrer">adsb.lol</a>',
+      },
     });
     // Zoom buttons only where there is room for them. Touch devices pinch, and
     // on a phone the controls would sit under the rail anyway.
@@ -300,29 +313,25 @@ export default function SkyMap() {
    * uploads every 30 s, so polling matches the real update rate anyway.
    */
   useEffect(() => {
-    const supabase = createClient();
     let alive = true;
 
     const load = async () => {
-      const [s, d, st, ty, sb, co] = await Promise.all([
-        // Ordered, always. The numbering people see is positional, so an
-        // unordered result renames every sensor between polls.
-        supabase.from("public_sensors").select("*").order("id"),
-        supabase.from("public_detections").select("*").order("started_at", { ascending: false }).limit(60),
-        supabase.from("public_sensor_stats").select("*"),
-        supabase.from("public_type_stats").select("*").order("passes", { ascending: false }),
-        supabase.from("public_spectrum_baseline").select("*"),
-        supabase.from("public_sensor_conditions").select("*"),
-      ]);
+      let payload: MapPayload;
+      try {
+        payload = (await (await fetch("/api/map")).json()) as MapPayload;
+      } catch (e) {
+        if (alive) setError(e instanceof Error ? e.message : String(e));
+        return;
+      }
       if (!alive) return;
-      setError(s.error ? s.error.message : null);
-      setSensors((s.data as PublicSensor[]) ?? []);
-      setStats((st.data as SensorStats[]) ?? []);
-      setTypes((ty.data as TypeStats[]) ?? []);
-      setSpectrum((sb.data as SpectrumBaseline[]) ?? []);
-      setConditions((co.data as SensorConditions[]) ?? []);
+      setError(payload.error ?? null);
+      setSensors(payload.sensors ?? []);
+      setStats(payload.stats ?? []);
+      setTypes(payload.types ?? []);
+      setSpectrum(payload.spectrum ?? []);
+      setConditions(payload.conditions ?? []);
 
-      const rows = (d.data as PublicDetection[]) ?? [];
+      const rows = payload.detections ?? [];
       setDetections(rows);
 
       // Flare only for detections that arrived after this page loaded.
@@ -339,9 +348,13 @@ export default function SkyMap() {
     // Sensor liveness is polled faster than history: the agent heartbeats every
     // 10 s, and a "hearing something right now" badge is worthless if it lags.
     const loadLive = async () => {
-      const s = await supabase.from("public_sensors").select("*").order("id");
-      if (!alive || s.error) return;
-      setSensors((s.data as PublicSensor[]) ?? []);
+      try {
+        const live = (await (await fetch("/api/map/live")).json()) as MapPayload;
+        if (!alive || live.error || !live.sensors) return;
+        setSensors(live.sensors);
+      } catch {
+        /* a dropped poll is not worth surfacing; the next one is 5 s away */
+      }
     };
 
     load();
@@ -719,6 +732,13 @@ export default function SkyMap() {
             Become a sensor
           </a>
         </footer>
+        <div
+          className={`px-5 pb-3 ${railOpen ? "" : "hidden md:block"}`}
+        >
+          <a href="/privacy" className="text-[11px] text-slate-dim hover:text-sodium">
+            Privacy
+          </a>
+        </div>
       </aside>
 
       {selectedSensor && (
