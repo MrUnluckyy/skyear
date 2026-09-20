@@ -1,28 +1,20 @@
 <!--
-  Magic link email — sent to someone who already has an account.
+  Confirm signup — the first email anyone ever gets from this project.
 
-  Deliverability first, design second. Every choice here is about landing in
-  an inbox rather than a spam folder:
+  This one matters more than the magic link. Supabase sends it when the
+  address is new, which is the case for every contributor who has just typed
+  their email into the setup guide, and the default Supabase copy is a bare
+  "Confirm your email" from a service they have never heard of. It therefore
+  says what SkyEar is in one line before asking for a click.
 
-  - No images. A mail whose content is one hosted image is a classic spam
-    signature, and most clients block remote images by default anyway. The
-    masthead is a coloured table cell and live text, not a logo file.
-  - No link shorteners or tracking redirects. The href is the Supabase
-    confirmation URL and nothing else.
-  - The literal URL is shown as text beneath the button. Some clients strip
-    buttons, some people will not click a button from an unknown sender, and
-    plenty of corporate filters rewrite anchors.
-  - Inline styles only, table layout. Gmail strips <style> blocks, so there is
-    no media query here and the card is a fixed 480px that still fits a phone.
-  - Says what the mail is for and what to do if it was not requested. Both
-    raise engagement and reduce spam complaints, which is what reputation is
-    actually built from.
+  Same deliverability rules as magic-link.html: no images, no tracking
+  redirects, inline styles, table layout, the literal URL shown as text, and a
+  plain statement of why this arrived. See that file for the reasoning.
 
-  Paste into: Supabase dashboard -> Authentication -> Emails -> Magic Link.
-  See docs/email-setup.md for the rest of the configuration.
+  Paste into: Supabase dashboard -> Authentication -> Emails -> Confirm signup.
 -->
 <div style="display:none;max-height:0;overflow:hidden;opacity:0;">
-  Your one-time sign-in link for SkyEar. It expires an hour after it was sent.
+  Confirm your address to finish setting up SkyEar. The link expires an hour after it was sent.
 </div>
 <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background:#f4f6f7;padding:32px 16px;">
   <tr>
@@ -37,7 +29,12 @@
         <tr>
           <td style="padding:26px 28px 0 28px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;">
             <p style="margin:0;font-size:15px;line-height:1.55;color:#11181c;">
-              Here is your sign-in link. It works once, and expires an hour after it was sent.
+              Confirm this address and your sensor can go on the map.
+            </p>
+            <p style="margin:10px 0 0 0;font-size:13px;line-height:1.6;color:#68757d;">
+              SkyEar listens to the microphone a security camera already has, and checks every
+              sound it hears against live aircraft positions — so each detection is scored against
+              what was actually in the sky.
             </p>
           </td>
         </tr>
@@ -47,12 +44,15 @@
                style="display:inline-block;background:#f0a94c;color:#11181c;text-decoration:none;
                       font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;
                       font-size:15px;font-weight:600;padding:11px 22px;border-radius:5px;">
-              Sign in to SkyEar
+              Confirm this address
             </a>
+            <p style="margin:12px 0 0 0;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;font-size:12px;color:#68757d;">
+              The link works once, and expires an hour after it was sent.
+            </p>
           </td>
         </tr>
         <tr>
-          <td style="padding:18px 28px 0 28px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;">
+          <td style="padding:14px 28px 0 28px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;">
             <p style="margin:0;font-size:12px;line-height:1.5;color:#68757d;">
               If the button does not work, copy this address into your browser:
             </p>
@@ -64,9 +64,9 @@
         <tr>
           <td style="padding:22px 28px 26px 28px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;">
             <p style="margin:0;padding-top:18px;border-top:1px solid #eceff1;font-size:12px;line-height:1.55;color:#68757d;">
-              You are receiving this because someone entered this address at
+              You are receiving this because this address was entered at
               <a href="https://skyear.lt" style="color:#68757d;">skyear.lt</a>. If that was not you,
-              ignore it — nothing happens until the link is opened.
+              ignore it — the account stays inactive and no sensor is created.
             </p>
           </td>
         </tr>
