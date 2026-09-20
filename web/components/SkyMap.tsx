@@ -68,6 +68,8 @@ const STYLES: Record<Theme, string> = {
   light: "https://basemaps.cartocdn.com/gl/positron-gl-style/style.json",
 };
 
+const LATEST_OPEN = "skyear:latest-open";
+
 const FROST = "#c9e2f0";
 const GROUND = "#55697a";
 
@@ -104,6 +106,25 @@ export default function SkyMap() {
   // On a phone the rail is a sheet that starts closed, so the map - the thing
   // people came for - is not buried under two panels of statistics.
   const [railOpen, setRailOpen] = useState(false);
+  // The latest-sound card covers a corner of the map, and someone reading the
+  // map wants it out of the way. Remembered, because re-collapsing it on every
+  // visit is the annoying kind of tidy. Client-only component, so reading
+  // storage during the first render cannot mismatch a server render.
+  const [latestOpen, setLatestOpen] = useState(() => {
+    try {
+      return window.localStorage.getItem(LATEST_OPEN) !== "0";
+    } catch {
+      return true;
+    }
+  });
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(LATEST_OPEN, latestOpen ? "1" : "0");
+    } catch {
+      /* private window, or site data blocked: the preference just will not stick */
+    }
+  }, [latestOpen]);
 
   // Screen positions for the DOM overlay, reprojected as the map moves.
   const [points, setPoints] = useState<Record<string, { x: number; y: number }>>({});
@@ -717,8 +738,32 @@ export default function SkyMap() {
         />
       )}
 
+      {/* Collapsed: a bar naming what was last heard, and nothing else. */}
+      {!selectedSensor && newest && !latestOpen && (
+        <button
+          onClick={() => setLatestOpen(true)}
+          aria-label="Show the latest sound"
+          aria-expanded={false}
+          className="absolute inset-x-0 bottom-0 z-10 flex items-center justify-between gap-3 border-t border-edge bg-night/92 px-4 py-2.5 text-left backdrop-blur-xl md:inset-x-auto md:bottom-0 md:right-0 md:m-4 md:max-w-[332px] md:rounded-sm md:border md:border-edge md:px-3 md:py-2 md:shadow-[0_18px_50px_-12px_rgba(0,0,0,0.8)]"
+        >
+          <span className="flex min-w-0 items-center gap-2">
+            <span aria-hidden className="shrink-0 text-[11px] text-slate-dim">
+              ⌃
+            </span>
+            <span
+              className={`min-w-0 truncate text-[12px] ${newest.match_flight ? "text-bone" : "text-sodium"}`}
+            >
+              {newest.match_flight ?? "Sound with no aircraft overhead"}
+            </span>
+          </span>
+          <span className="shrink-0 font-mono text-[11px] text-slate-dim">
+            {new Date(newest.started_at).toLocaleTimeString()}
+          </span>
+        </button>
+      )}
+
       {/* The most recent sound, in enough detail to judge it. */}
-      {!selectedSensor && newest && (
+      {!selectedSensor && newest && latestOpen && (
         <section className="absolute inset-x-0 bottom-0 z-10 flex max-h-[62dvh] flex-col overflow-hidden border-t border-edge bg-night/92 backdrop-blur-xl md:inset-x-auto md:bottom-0 md:right-0 md:m-4 md:max-h-[74dvh] md:w-[332px] md:rounded-sm md:border md:shadow-[0_18px_50px_-12px_rgba(0,0,0,0.8)]">
           <div className="flex shrink-0 items-start justify-between border-b border-edge px-4 py-3">
             <div className="min-w-0">
@@ -734,7 +779,17 @@ export default function SkyMap() {
                 {newest.match_slant_m ? ` · ${(newest.match_slant_m / 1000).toFixed(1)} km away` : ""}
               </p>
             </div>
-            <OctaveBars octaves={newest.octave_db} />
+            <div className="flex shrink-0 items-start gap-2">
+              <OctaveBars octaves={newest.octave_db} />
+              <button
+                onClick={() => setLatestOpen(false)}
+                className="rounded border border-edge px-1.5 py-0.5 text-[11px] leading-none text-slate hover:border-sodium hover:text-sodium"
+                aria-label="Hide the latest sound"
+                aria-expanded
+              >
+                –
+              </button>
+            </div>
           </div>
 
           <div className="scroll-thin flex-1 overflow-y-auto">
