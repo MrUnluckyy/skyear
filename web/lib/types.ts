@@ -291,6 +291,71 @@ export function matchConfidence(d: PublicDetection): "strong" | "fair" | "weak" 
 }
 
 
+/**
+ * Is this worth interrupting someone for?
+ *
+ * Most of what a microphone outdoors hears is traffic, wind and weather, and a
+ * map that announces every one of them teaches people to ignore it. Attention
+ * is reserved for what the project can actually stand behind: an aircraft the
+ * geometry supports, or the class this exists to find.
+ */
+export function isNotable(d: PublicDetection): boolean {
+  if (d.class === "drone") return true;
+  return matchConfidence(d) !== "weak";
+}
+
+/**
+ * Airframe families, because ICAO type codes split things nobody wants split.
+ *
+ * A320, A20N and A21N are one aeroplane to everyone except a spotter, and
+ * listing them separately filled the rail with rows that looked like
+ * duplicates while hiding the comparison that matters - do propellers carry
+ * further than jets, do small aircraft go unheard.
+ */
+const FAMILY_RULES: [RegExp, string][] = [
+  // Order matters: the first match wins, so the narrow cases come first.
+  [/^(EC|AS[35]|H1[0-9]|R4[04]|R66|S76|AW1|B06|B4[02]9|B505|MI8|KA32)/, "Helicopter"],
+  [/^(A400|C17|C130|K35R|P8|E3TF|RC13|F16|F35|H60)/, "Military"],
+  [/^BCS[13]$/, "A220 family"],
+  [/^A3(18|19|20|21)$|^A2[01]N$/, "A320 family"],
+  [/^B73[0-9]$|^B3[89]M$/, "737 family"],
+  [/^A3(0|1|3|4|5|8)[0-9A-Z]$|^B7[4678][0-9A-Z]$/, "Widebody"],
+  [/^CRJ|^E1[79][05]$|^E29[05]$|^E7[05]S$|^RJ(85|1H)$|^SU95$/, "Regional jet"],
+  [/^AT[47][2-6]$|^DH8[A-D]$|^SB20$|^F50$|^SF34$|^JS[0-9]|^E120$|^C208$/, "Turboprop airliner"],
+  [/^C1[0-9]{2}$|^C20[0-6]$|^P[A2]8|^PA[0-9]{2}$|^S(R2[02]|22T)$|^DA[04][0-2]$|^TBM[0-9]|^DV20$|^AT3$|^GLID$/, "Light aircraft"],
+  [/^C(2[5-9]|5|6|7)[0-9A-Z]{1,2}$|^CL[36]0$|^GLF[0-9]|^LJ[0-9]{2}$|^E5[05][0P]$|^E35L$|^E545$|^H25B$|^PC(12|24)$|^BE(20|40|9L)$|^FA[0-9]|^F2TH$|^GALX$|^EA50$|^PRM1$/, "Business jet"],
+  [/^unknown$/i, "Unknown type"],
+];
+
+export function typeFamily(code: string): string {
+  for (const [re, label] of FAMILY_RULES) if (re.test(code)) return label;
+  return code;
+}
+
+/** The same pooling as poolTypes, one level up: by family rather than type. */
+export function poolFamilies(types: TypeStats[]): (TypeStats & { members: string[] })[] {
+  const by = new Map<string, TypeStats & { members: string[] }>();
+  for (const t of poolTypes(types)) {
+    const key = typeFamily(t.aircraft_type);
+    const prev = by.get(key);
+    if (!prev) {
+      by.set(key, { ...t, aircraft_type: key, members: [t.aircraft_type] });
+      continue;
+    }
+    const passes = prev.passes + t.passes;
+    by.set(key, {
+      ...prev,
+      passes,
+      heard: prev.heard + t.heard,
+      avg_slant_m: Math.round(
+        (prev.avg_slant_m * prev.passes + t.avg_slant_m * t.passes) / Math.max(passes, 1)
+      ),
+      members: [...prev.members, t.aircraft_type],
+    });
+  }
+  return [...by.values()].sort((a, b) => b.passes - a.passes);
+}
+
 /** A stable name, so a sensor does not change identity between polls. */
 export function sensorName(s: PublicSensor, index: number): string {
   return s.label?.trim() || `Sensor ${index + 1}`;

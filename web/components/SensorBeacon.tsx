@@ -13,8 +13,12 @@ const PHASE_STYLE: Record<SensorPhase, { colour: string; ring: string; stagger: 
   offline: { colour: "var(--slate-dim)", ring: "", stagger: 0 },
   warming: { colour: "var(--slate)", ring: "ring-warming", stagger: 1.67 },
   listening: { colour: "var(--sodium)", ring: "", stagger: 1.13 },
-  rising: { colour: "var(--sodium)", ring: "ring-rising", stagger: 0.67 },
-  hearing: { colour: "var(--signal)", ring: "ring-hearing", stagger: 0.38 },
+  rising: { colour: "var(--sodium)", ring: "", stagger: 1.13 },
+  // Sound present. Cool and unhurried on purpose: a microphone by a road is
+  // "hearing something" every minute of the day, and a marker that pulses
+  // green through all of it teaches people that green means nothing. The
+  // arrival flare, which fires only for a match worth trusting, is the alarm.
+  hearing: { colour: "var(--frost)", ring: "", stagger: 1.13 },
 };
 
 export function SensorBeacon({
@@ -42,6 +46,9 @@ export function SensorBeacon({
   const { colour, ring, stagger } = PHASE_STYLE[phase];
   const live = phase !== "offline";
   const hearing = phase === "hearing";
+  // One unexplained sound in the window is a passing van; a cluster of them is
+  // the thing this project is looking for. Only the cluster is drawn.
+  const standing = unaccounted >= 3;
 
   return (
     <div className="pointer-events-none relative" aria-hidden>
@@ -89,7 +96,7 @@ export function SensorBeacon({
         "drone". It persists for the window rather than flashing, because the
         sound has already finished by the time it reaches the map.
       */}
-      {unaccounted > 0 && (
+      {standing && (
         <span
           className="unaccounted-ring absolute rounded-full border border-dashed"
           style={{ inset: -20, borderColor: "var(--sodium)" }}
@@ -128,8 +135,8 @@ export function SensorBeacon({
         style={{ top: 14, left: -10 }}
       >
         {name && <span className="block text-bone">{name}</span>}
-        <span className="block" style={{ color: unaccounted > 0 ? "var(--sodium)" : colour }}>
-          {unaccounted > 0
+        <span className="block" style={{ color: standing ? "var(--sodium)" : colour }}>
+          {standing
             ? `${unaccounted} unexplained`
             : (
                 <>
@@ -193,16 +200,20 @@ export function DetectionRow({
     second: "2-digit",
   });
   const matched = Boolean(d.match_flight);
+  // Most rows in this list are traffic and weather. Reading it should feel
+  // like scanning for the matched ones, so the rest recede rather than
+  // competing: same information, a third of the contrast.
+  const highlight = active && matched;
 
   return (
     <li
       className={`grid grid-cols-[auto_1fr_auto] items-center gap-3 border-l-2 py-2 pl-3 transition-colors ${
-        active ? "border-l-sodium bg-haze/70" : "border-l-transparent"
-      }`}
+        highlight ? "border-l-sodium bg-haze/70" : "border-l-transparent"
+      } ${matched ? "" : "opacity-60"}`}
     >
       <span className="font-mono text-[11px] text-slate-dim">{time}</span>
       <span className="min-w-0">
-        <span className={`block truncate text-[13px] ${matched ? "text-bone" : "text-slate"}`}>
+        <span className={`block truncate text-[13px] ${matched ? "text-bone" : "text-slate-dim"}`}>
           {d.match_flight ?? "No aircraft overhead"}
         </span>
         <span className="font-mono text-[10px] text-slate-dim">

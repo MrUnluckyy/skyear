@@ -11,7 +11,8 @@ import {
   conditionVerdict,
   fleetBaseline,
   fleetWindow,
-  poolTypes,
+  isNotable,
+  poolFamilies,
   sensorNames,
   sensorPhase,
   unaccountedBySensor,
@@ -116,6 +117,9 @@ export default function SkyMap() {
   // On a phone the rail is a sheet that starts closed, so the map - the thing
   // people came for - is not buried under two panels of statistics.
   const [railOpen, setRailOpen] = useState(false);
+  // Ticks so "heard 4 min ago" ages without a reload. Kept out of render,
+  // which cannot read the clock.
+  const [now, setNow] = useState(0);
   // The latest-sound card covers a corner of the map, and someone reading the
   // map wants it out of the way. Remembered, because re-collapsing it on every
   // visit is the annoying kind of tidy. Client-only component, so reading
@@ -339,7 +343,9 @@ export default function SkyMap() {
       for (const row of rows) {
         if (seen.current.has(row.id)) continue;
         seen.current.add(row.id);
-        if (!first.current) fresh[row.sensor_id] = Date.now();
+        // Flare for arrivals the project can stand behind. Every passing van
+        // used to flash the map, which taught people the flash meant nothing.
+        if (!first.current && isNotable(row)) fresh[row.sensor_id] = Date.now();
       }
       first.current = false;
       if (Object.keys(fresh).length) setFlares((prev) => ({ ...prev, ...fresh }));
@@ -364,6 +370,16 @@ export default function SkyMap() {
       alive = false;
       clearInterval(slow);
       clearInterval(fast);
+    };
+  }, []);
+
+  useEffect(() => {
+    const tick = () => setNow(Date.now());
+    const first = setTimeout(tick, 0);
+    const id = setInterval(tick, 30_000);
+    return () => {
+      clearTimeout(first);
+      clearInterval(id);
     };
   }, []);
 
@@ -393,7 +409,29 @@ export default function SkyMap() {
   // public_type_stats is per sensor, so an airframe seen by two sensors
   // appeared twice in this list with different figures - which reads as a bug
   // and hides the pooled sample size that actually matters.
-  const pooledTypes = useMemo(() => poolTypes(types), [types]);
+  const families = useMemo(() => poolFamilies(types), [types]);
+  const [allTypes, setAllTypes] = useState(false);
+  const typeTotals = useMemo(
+    () =>
+      families.reduce(
+        (a, f) => ({ heard: a.heard + f.heard, passes: a.passes + f.passes }),
+        { heard: 0, passes: 0 }
+      ),
+    [families]
+  );
+
+  /**
+   * The last thing worth announcing, and when.
+   *
+   * A sensor hears something roughly all the time - a thousand events a day at
+   * a roadside - so "hearing something" is not news. A match the geometry
+   * supports is.
+   */
+  const lastNotable = useMemo(() => detections.find(isNotable) ?? null, [detections]);
+  const notableAgeMin =
+    lastNotable && now > 0
+      ? Math.floor((now - new Date(lastNotable.started_at).getTime()) / 60_000)
+      : null;
   const heardRate = total.passes ? total.heard / total.passes : null;
   const airborne = aircraft.filter((a) => a.alt_m > 0).length;
   const newest = detections[0] ?? null;
@@ -553,23 +591,38 @@ export default function SkyMap() {
             </div>
           </div>
 
-          <p className="mt-3 flex items-center gap-2 text-[12px]">
+          {/*
+            What this line used to say was "3 sensors hearing something", all
+            day, because a microphone outdoors always is. It now leads with the
+            last match the geometry supports and keeps live sound as an aside,
+            which is the order of interest.
+          */}
+          <p className="mt-3 flex items-baseline gap-2 text-[12px]">
             <span
-              className="breathe inline-block h-1.5 w-1.5 rounded-full"
+              className="breathe inline-block h-1.5 w-1.5 shrink-0 translate-y-[-1px] rounded-full"
               style={{
-                background: hearing
-                  ? "var(--signal)"
-                  : online
-                    ? "var(--sodium)"
-                    : "var(--slate-dim)",
+                background:
+                  notableAgeMin !== null && notableAgeMin < 15
+                    ? "var(--signal)"
+                    : online
+                      ? "var(--sodium)"
+                      : "var(--slate-dim)",
               }}
             />
-            <span className="text-slate">
-              {hearing > 0
-                ? `${hearing} sensor${hearing > 1 ? "s" : ""} hearing something`
-                : online > 0
-                  ? `${online} sensor${online > 1 ? "s" : ""} listening`
-                  : "No sensor listening"}
+            <span className="min-w-0 truncate text-slate">
+              {online === 0 ? (
+                "No sensor listening"
+              ) : lastNotable && notableAgeMin !== null && notableAgeMin < 120 ? (
+                <>
+                  {lastNotable.match_flight ?? "Drone-like sound"} heard{" "}
+                  {notableAgeMin < 1 ? "just now" : `${notableAgeMin} min ago`}
+                </>
+              ) : (
+                `${online} sensor${online > 1 ? "s" : ""} listening`
+              )}
+              {hearing > 0 && (
+                <span className="text-slate-dim"> · sound now</span>
+              )}
             </span>
           </p>
         </header>
@@ -645,28 +698,62 @@ export default function SkyMap() {
             )}
           </section>
 
-          {/* Per type: the comparison that shows whether some airframes hide. */}
+          {/*
+            Per family: the comparison that shows whether some airframes hide.
+
+            Grouped rather than per ICAO type. A320, A20N and A21N are one
+            aeroplane to everyone but a spotter, and listing them separately
+            filled the rail with rows that read as duplicates while burying the
+            question worth asking - do propellers and light aircraft carry as
+            far as jets. Background information, so it is sized like it.
+          */}
           {types.length > 0 && (
-            <section className="border-b border-edge px-5 py-4">
-              <h2 className="text-[12px] text-slate">Heard by aircraft type</h2>
-              <ul className="mt-3 space-y-2">
-                {pooledTypes.slice(0, 7).map((t) => {
+            <section className="border-b border-edge px-5 py-3.5">
+              <div className="flex items-baseline justify-between gap-2">
+                <h2 className="text-[11px] text-slate-dim">
+                  By aircraft type
+                  {typeTotals.passes > 0 && (
+                    <span className="ml-1.5 font-mono">
+                      {Math.round((typeTotals.heard / typeTotals.passes) * 100)}% of{" "}
+                      {typeTotals.passes}
+                    </span>
+                  )}
+                </h2>
+                {families.length > 4 && (
+                  <button
+                    onClick={() => setAllTypes((v) => !v)}
+                    className="text-[11px] text-slate-dim hover:text-sodium"
+                  >
+                    {allTypes ? "less" : "all"}
+                  </button>
+                )}
+              </div>
+              <ul className="mt-2 space-y-1">
+                {(allTypes ? families : families.slice(0, 4)).map((t) => {
                   const rate = t.passes ? t.heard / t.passes : 0;
                   return (
-                    <li key={t.aircraft_type} className="grid grid-cols-[42px_1fr_auto] items-center gap-2">
-                      <span className="font-mono text-[11px] text-bone">{t.aircraft_type}</span>
-                      <span className="h-1.5 overflow-hidden rounded-full bg-haze">
-                        <span
-                          className="block h-full rounded-full"
-                          style={{
-                            width: `${Math.max(rate * 100, t.heard ? 6 : 0)}%`,
-                            background: t.heard ? "var(--signal)" : "transparent",
-                          }}
-                        />
-                      </span>
-                      <span className="font-mono text-[10px] text-slate-dim">
-                        {t.heard}/{t.passes}
-                      </span>
+                    <li key={t.aircraft_type}>
+                      <div className="grid grid-cols-[104px_1fr_auto] items-center gap-2">
+                        <span className="truncate text-[11px] text-slate">{t.aircraft_type}</span>
+                        <span className="h-1 overflow-hidden rounded-full bg-haze">
+                          <span
+                            className="block h-full rounded-full"
+                            style={{
+                              width: `${Math.max(rate * 100, t.heard ? 4 : 0)}%`,
+                              background: t.heard ? "var(--signal)" : "transparent",
+                              opacity: 0.75,
+                            }}
+                          />
+                        </span>
+                        <span className="font-mono text-[10px] text-slate-dim">
+                          {t.heard}/{t.passes}
+                        </span>
+                      </div>
+                      {allTypes && t.members.length > 1 && (
+                        <p className="mt-0.5 pl-1 font-mono text-[10px] text-slate-dim/80">
+                          {t.members.join(" ")}
+                        </p>
+                      )}
                     </li>
                   );
                 })}
@@ -680,9 +767,9 @@ export default function SkyMap() {
             <dl className="mt-3 grid grid-cols-2 gap-x-3 gap-y-3">
               {[
                 ["Unexplained", String(unexplainedCount)],
-                ["Events", String(total.detections)],
+                ["Sounds today", String(total.detections)],
                 ["Wind-tagged", String(total.wind)],
-                ["Aircraft up", String(airborne)],
+                ["Aircraft tracked", String(airborne)],
               ].map(([label, value]) => (
                 <div key={label}>
                   <dt className="text-[11px] text-slate-dim">{label}</dt>
