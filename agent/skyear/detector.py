@@ -5,11 +5,14 @@ engine band. This is intentionally simple: it is the data collector that the
 ML classifier will later be trained on.
 """
 import collections
+import logging
 import math
 
 import numpy as np
 
 from .rotor import comb
+
+log = logging.getLogger("detector")
 
 OCTAVES = [(50, 100), (100, 200), (200, 400), (400, 800), (800, 1600), (1600, 3200)]
 
@@ -105,6 +108,12 @@ class BandEnergyDetector:
         k = int(np.argmax(resid))
         return float(resid[k]), float(self.sr / (lo + k))
 
+    # How far the frame timeline may sit from the audio clock before it is
+    # snapped back. Large enough that ordinary jitter does not move it, small
+    # enough that matching - which needs timestamps good to a second or two -
+    # is never fed a stale one.
+    RESYNC_S = 1.0
+
     def _frame(self, x):
         spec = np.abs(np.fft.rfft(x * self.win)) ** 2 + 1e-20
         db = 10 * math.log10(spec[self.band].mean())
@@ -115,9 +124,26 @@ class BandEnergyDetector:
         return db, peak_f, octs, cpp, f0
 
     def process(self, t, x):
-        """Feed audio; returns list of finished events (dicts)."""
-        if self.pending_t is None or len(self.pending) == 0:
-            self.pending_t = t
+        """Feed audio; returns list of finished events (dicts).
+
+        The chunk timestamp is authoritative. audio.py re-anchors it to wall
+        time whenever the stream stalls, and a detector that answers by
+        counting frames instead stays behind by the length of every stall it
+        has ever seen - permanently, because nothing here ever catches up.
+
+        This used to re-sync only when the buffer happened to be empty, which
+        a 0.25 s chunk and a frame size that does not divide into it almost
+        never is. One agent spent two days stamping events 31 hours in the
+        past: they uploaded, they were stored, and every aircraft match failed
+        because the sky they were compared against was a day and a half old.
+        """
+        # Where the buffered audio starts, given this chunk's timestamp.
+        anchor = t - len(self.pending) / self.sr
+        if self.pending_t is None or abs(self.pending_t - anchor) > self.RESYNC_S:
+            if self.pending_t is not None and abs(self.pending_t - anchor) > 60:
+                log.warning("detector clock was %.0f s from the audio clock, re-syncing",
+                            self.pending_t - anchor)
+            self.pending_t = anchor
         self.pending = np.concatenate([self.pending, x])
         out = []
         while len(self.pending) >= self.n:

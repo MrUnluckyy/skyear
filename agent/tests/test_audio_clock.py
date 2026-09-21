@@ -84,3 +84,55 @@ def test_replay_keeps_file_relative_time(monkeypatch):
     stamps = [t for t, _ in src.chunks(file_t0=0.0)]
     assert stamps[0] == 0.0
     assert stamps[-1] < 1.0, "file time advances by content, not by clock"
+
+
+# --- the detector's own timeline ----------------------------------------
+
+def test_event_times_follow_the_audio_clock_after_a_stall():
+    """A stall must not leave the detector stamping events in the past.
+
+    audio.py re-anchors its timestamps to wall time when a stream stalls. The
+    detector used to ignore that and keep counting frames, so a laptop that
+    slept for a day carried on stamping events a day behind - they uploaded,
+    they stored, and every aircraft match failed against a sky that was no
+    longer there. This is that bug.
+    """
+    import numpy as np
+    from skyear.detector import BandEnergyDetector
+
+    det = BandEnergyDetector(sr=16000)
+    # One short read - an odd byte count trimmed to an odd sample count - is
+    # all it takes: from then on the buffer never empties exactly, which is
+    # what the old re-sync condition waited for.
+    chunk = np.zeros(3999, dtype=np.float32)
+
+    t = 1_000_000.0
+    for _ in range(20):
+        det.process(t, chunk)
+        t += 0.25
+
+    # The stream stalls for a day; audio.py re-anchors and the next chunk
+    # arrives with a timestamp far ahead of where the frame timeline sits.
+    t += 86_400.0
+    det.process(t, chunk)
+
+    behind = t - det.pending_t
+    assert behind < 2.0, f"detector is {behind:.0f} s behind the audio clock after a stall"
+
+
+def test_the_frame_timeline_is_not_jittered_by_ordinary_chunks():
+    """Re-syncing must not fire on normal operation, or frame times wander."""
+    import numpy as np
+    from skyear.detector import BandEnergyDetector
+
+    det = BandEnergyDetector(sr=16000)
+    chunk = np.zeros(3999, dtype=np.float32)
+    t = 500_000.0
+    for _ in range(40):
+        det.process(t, chunk)
+        t += 0.25
+
+    # pending_t is the start of what is still buffered, so it sits just behind
+    # the last chunk timestamp - never ahead, never drifting away.
+    gap = t - det.pending_t
+    assert 0 <= gap <= 0.5, f"frame timeline drifted {gap:.3f} s from the audio clock"
