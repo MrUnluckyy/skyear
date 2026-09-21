@@ -133,3 +133,21 @@ body {
 .scroll-thin::-webkit-scrollbar { width: 6px; }
 .scroll-thin::-webkit-scrollbar-thumb { background: var(--edge); border-radius: 3px; }
 .scroll-thin::-webkit-scrollbar-track { background: transparent; }
+
+
+/*
+ * Attribution lives bottom-left because the bottom-right corner belongs to the
+ * latest-sound card. On a phone it clears the collapsed card bar; when that
+ * card is open it covers the map anyway.
+ */
+.maplibregl-ctrl-bottom-left {
+  margin-bottom: 52px;
+}
+
+@media (min-width: 768px) {
+  .maplibregl-ctrl-bottom-left {
+    /* Clear of the 304px instrument rail. */
+    margin-left: 312px;
+    margin-bottom: 4px;
+  }
+}

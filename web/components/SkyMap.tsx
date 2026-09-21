@@ -1,7 +1,12 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Map as MapLibreMap, NavigationControl, setWorkerUrl } from "maplibre-gl";
+import {
+  AttributionControl,
+  Map as MapLibreMap,
+  NavigationControl,
+  setWorkerUrl,
+} from "maplibre-gl";
 import type { GeoJSONSource } from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
 import {
@@ -91,7 +96,10 @@ function aircraftFeatures(list: Aircraft[]) {
       type: "Feature" as const,
       geometry: { type: "Point" as const, coordinates: [a.lon, a.lat] },
       properties: {
-        label: a.flight ?? a.hex,
+        // Callsign, then registration, then the ICAO address. Most light
+        // aircraft carry no callsign at all, and "LY-LMM" is recognisable in a
+        // way that "502dae" is not.
+        label: a.flight ?? a.reg ?? a.hex,
         alt: a.alt_m,
         onGround: a.alt_m <= 0,
       },
@@ -201,16 +209,24 @@ export default function SkyMap() {
       // Only until the first fit below: the container may not have a size yet.
       center: [23.89, 55.17],
       zoom: 6,
-      attributionControl: {
-        compact: true,
-        customAttribution: 'Aircraft <a href="https://adsb.lol" target="_blank" rel="noreferrer">adsb.lol</a>',
-      },
+      // Added by hand below, on the other side: the default bottom-right
+      // corner is where the latest-sound card sits, and attribution that is
+      // covered is not attribution.
+      attributionControl: false,
     });
     // Zoom buttons only where there is room for them. Touch devices pinch, and
     // on a phone the controls would sit under the rail anyway.
     if (window.innerWidth >= 768) {
       m.addControl(new NavigationControl({ showCompass: false }), "top-right");
     }
+    m.addControl(
+      new AttributionControl({
+        compact: true,
+        customAttribution:
+          'Aircraft <a href="https://adsb.lol" target="_blank" rel="noreferrer">adsb.lol</a>',
+      }),
+      "bottom-left"
+    );
 
     m.on("error", (e) => {
       const msg = (e as unknown as { error?: { message?: string } }).error?.message ?? String(e);

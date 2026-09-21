@@ -186,6 +186,8 @@ export type TypeStats = {
 
 /** Live ADS-B aircraft, served by our own proxy - never fetched per browser. */
 export type Aircraft = {
+  /** Tail number. Often the only human-readable identity a light aircraft has. */
+  reg?: string | null;
   hex: string;
   flight: string | null;
   type: string | null;

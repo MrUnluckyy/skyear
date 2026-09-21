@@ -56,6 +56,7 @@ function parse(json: unknown): Aircraft[] {
     out.push({
       hex: String(a.hex ?? "").toLowerCase(),
       flight: typeof a.flight === "string" ? a.flight.trim() || null : null,
+      reg: typeof a.r === "string" ? a.r.trim() || null : null,
       type: typeof a.t === "string" ? a.t : null,
       lat: a.lat,
       lon: a.lon,
