@@ -325,6 +325,26 @@ def test_delete_removes_the_camera_and_its_secret(tmp_path):
     assert after["secrets"]["HOME_1_SECRET"] == "a"
 
 
+def test_a_single_camera_install_can_still_grow_into_two():
+    """The add button lives inside the camera bar, and nothing else opens a
+    blank camera form.
+
+    The bar was hidden whenever fewer than two cameras existed, so the button
+    that creates the second camera only appeared once a second camera already
+    existed. A one-camera install had no route to a second one at all, and
+    deleting the first to start over just led back to the same dead end.
+    """
+    from pathlib import Path
+    import skyear
+
+    page = (Path(skyear.__file__).parent / "setup.html").read_text()
+    start = page.index('<div id="camBar"')
+    bar = page[start : page.index("</div>", start)]
+    assert 'id="addCam"' in bar, "the add button must live in the bar this guards"
+    assert "bar.hidden = cameras.length === 0;" in page, \
+        "the bar must be visible as soon as one camera exists"
+
+
 # --- clip playback on the labelling page --------------------------------
 
 CLIP = bytes(range(256)) * 4   # 1024 distinguishable bytes

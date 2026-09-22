@@ -87,9 +87,10 @@ docker compose up -d
 
 ### More than one camera
 
-Add them on the same setup page — a camera bar appears once there is more than
-one. The agent tells the server which cameras it has on every upload, so a new
-one registers itself; restart the agent after adding it so it starts listening.
+Add them on the same setup page — a camera bar appears above the form once the
+first camera is saved. The agent tells the server which cameras it has on every
+upload, so a new one registers itself; restart the agent after adding it so it
+starts listening.
 
 ## What crosses your network boundary
 
@@ -116,7 +117,7 @@ details stripped.
 cd agent
 python3 -m venv .venv
 .venv/bin/python -m pip install -r requirements-dev.txt
-.venv/bin/python -m pytest          # 153 tests
+.venv/bin/python -m pytest          # 182 tests
 
 .venv/bin/python -m skyear.main --config config.yaml --data ./out --replay rec.wav
 ```

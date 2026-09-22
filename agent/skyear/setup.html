@@ -56,8 +56,8 @@
 
   <div class="steps" id="steps"></div>
 
-  <!-- Which camera is being edited. Hidden until there is more than one, so a
-       single-camera setup stays exactly as simple as it was. -->
+  <!-- Which camera is being edited, and the only route to a second one. Hidden
+       only before the first camera exists, so a fresh install is one plain form. -->
   <div id="camBar" class="cambar" hidden>
     <span class="cambar-label">Cameras</span>
     <span id="camChips"></span>
@@ -383,7 +383,13 @@ function showCamera(cam) {
 
 function renderChips() {
   const bar = $("camBar");
-  bar.hidden = cameras.length < 2 && editing !== null;
+  /*
+   * Visible as soon as one camera is saved, because "+ Add another" lives in
+   * here and nothing else opens a blank form. Hiding the bar below two cameras
+   * meant the button that creates the second one only appeared once a second
+   * one existed, so a single-camera install could never grow.
+   */
+  bar.hidden = cameras.length === 0;
   const wrap = $("camChips");
   wrap.innerHTML = "";
   for (const c of cameras) {
