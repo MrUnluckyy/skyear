@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { createClient } from "@/lib/supabase";
+import SiteNav from "@/components/SiteNav";
 
 /** Unambiguous alphabet: no O/0, I/1, so a code read aloud is unambiguous. */
 const ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
@@ -30,6 +31,51 @@ type Sensor = {
 };
 
 const MAX_LABEL = 40;
+
+function countdown(ms: number) {
+  const total = Math.max(0, Math.floor(ms / 1000));
+  return `${Math.floor(total / 60)}:${String(total % 60).padStart(2, "0")}`;
+}
+
+/**
+ * One live code, with the two things you do with it: read it, or copy it.
+ *
+ * The time left is counted down rather than printed as a clock time. "Expires
+ * 14:32" asks you to work out whether that has happened yet; "4:18 left" does
+ * not, and it is the only number on this page that changes while you look at
+ * it - which is also the warning that it will run out.
+ */
+function LiveCode({ code, expiresAt, now }: { code: string; expiresAt: string; now: number }) {
+  const [copied, setCopied] = useState(false);
+
+  async function copy() {
+    try {
+      await navigator.clipboard.writeText(code);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch {
+      // Clipboard access can be refused outright. The code is on screen in a
+      // face chosen so it can be read off it, so this is not a dead end.
+      setCopied(false);
+    }
+  }
+
+  return (
+    <li className="flex flex-wrap items-center gap-x-5 gap-y-2 border border-sodium/40 bg-sodium/5 px-4 py-3">
+      <code className="font-mono text-[22px] tracking-[0.22em] text-sodium">{code}</code>
+      <button
+        onClick={copy}
+        className="border border-edge px-2.5 py-1 text-[12px] text-slate hover:border-sodium/50 hover:text-sodium"
+      >
+        {copied ? "Copied" : "Copy"}
+      </button>
+      <span className="ml-auto text-[12px] text-slate-dim">
+        <span className="font-mono text-slate">{countdown(new Date(expiresAt).getTime() - now)}</span>{" "}
+        left
+      </span>
+    </li>
+  );
+}
 
 /**
  * Naming one sensor.
@@ -77,12 +123,12 @@ function SensorName({
           }}
           placeholder="Name this sensor"
           aria-label={`Name for camera ${sensor.camera_id}`}
-          className="min-w-0 flex-1 rounded-lg border border-white/10 bg-neutral-950 px-2.5 py-1.5 text-sm text-neutral-100 placeholder:text-neutral-600 focus:border-sky-500/60 focus:outline-none"
+          className="min-w-0 flex-1 border border-edge bg-night-deep px-2.5 py-1.5 text-[13.5px] text-bone placeholder:text-slate-dim focus:border-sodium/60 focus:outline-none"
         />
         <button
           onClick={save}
           disabled={!dirty || state === "saving" || retired}
-          className="rounded-lg border border-white/10 px-2.5 py-1.5 text-xs text-neutral-300 hover:border-sky-500/50 hover:text-sky-300 disabled:opacity-40"
+          className="border border-edge px-2.5 py-1.5 text-[12px] text-slate hover:border-sodium/50 hover:text-sodium disabled:opacity-40"
         >
           {state === "saving" ? "Saving…" : "Save"}
         </button>
@@ -93,16 +139,16 @@ function SensorName({
             setMessage(err);
             setState(err ? "error" : "idle");
           }}
-          className="rounded-lg border border-white/10 px-2.5 py-1.5 text-xs text-neutral-400 hover:border-amber-500/50 hover:text-amber-300"
+          className="border border-edge px-2.5 py-1.5 text-[12px] text-slate-dim hover:border-sodium/50 hover:text-sodium"
         >
           {retired ? "Put back on the map" : "Remove from map"}
         </button>
       </div>
-      <p className="mt-1 text-xs text-neutral-500">
-        camera <code className="text-neutral-400">{sensor.camera_id}</code>
-        {retired && <span className="ml-2 text-amber-400">off the map · history kept</span>}
-        {state === "saved" && <span className="ml-2 text-emerald-400">saved</span>}
-        {state === "error" && <span className="ml-2 text-red-400">{message}</span>}
+      <p className="mt-1 text-[12px] text-slate-dim">
+        camera <code className="font-mono text-slate">{sensor.camera_id}</code>
+        {retired && <span className="ml-2 text-sodium">off the map, history kept</span>}
+        {state === "saved" && <span className="ml-2 text-signal">saved</span>}
+        {state === "error" && <span className="ml-2 text-bad">{message}</span>}
       </p>
     </li>
   );
@@ -117,6 +163,7 @@ export default function Devices() {
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
+  const [now, setNow] = useState(() => Date.now());
 
   const load = useCallback(async () => {
     const { data: user } = await supabase.auth.getUser();
@@ -138,9 +185,21 @@ export default function Devices() {
     load();
   }, [load]);
 
-  // Unused codes only; the snippets below embed the newest one so there is
-  // nothing to retype.
-  const live = codes.filter((c) => !c.used_at && new Date(c.expires_at) > new Date());
+  const live = codes.filter((c) => !c.used_at && new Date(c.expires_at).getTime() > now);
+
+  /**
+   * Tick only while a code is counting down.
+   *
+   * The clock exists to show a code running out, so it has no business
+   * re-rendering the page every second on an account that is just renaming a
+   * sensor.
+   */
+  useEffect(() => {
+    const pending = codes.some((c) => !c.used_at && new Date(c.expires_at).getTime() > Date.now());
+    if (!pending) return;
+    const id = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(id);
+  }, [codes]);
 
   async function saveLabel(id: string, label: string | null): Promise<string | null> {
     const { error } = await supabase.from("sensors").update({ label }).eq("id", id);
@@ -215,10 +274,10 @@ export default function Devices() {
 
   if (!email) {
     return (
-      <main className="flex min-h-dvh items-center justify-center bg-neutral-950 text-sm text-neutral-400">
+      <main className="flex min-h-dvh items-center justify-center bg-night-deep px-6 text-[14px] text-slate">
         <p>
           Not signed in.{" "}
-          <a href="/login" className="text-sky-400 underline">
+          <a href="/login" className="text-sodium hover:underline">
             Sign in
           </a>{" "}
           to pair a sensor.
@@ -228,172 +287,169 @@ export default function Devices() {
   }
 
   return (
-    <main className="min-h-dvh bg-neutral-950 p-6 text-neutral-100">
-      <div className="mx-auto max-w-2xl space-y-6">
-        <header className="flex items-baseline justify-between">
-          <div>
-            <h1 className="text-lg font-semibold tracking-tight">Sensors</h1>
-            <p className="text-sm text-neutral-400">{email}</p>
-          </div>
-          <nav className="flex gap-4 text-sm">
-            <a href="/join" className="text-slate hover:text-sodium">
-              Setup guide
-            </a>
-            <a href="/" className="text-slate hover:text-sodium">
-              Map
-            </a>
-          </nav>
+    <main className="min-h-dvh bg-night-deep px-6 py-12 text-bone">
+      <div className="mx-auto max-w-3xl">
+        <SiteNav current="/devices" />
+
+        <header className="mt-8">
+          <h1 className="text-[30px] leading-tight tracking-tight">Your sensors</h1>
+          <p className="mt-2 text-[13px] text-slate-dim">{email}</p>
         </header>
 
-        <section className="rounded-xl border border-white/10 bg-neutral-900/70 p-5">
-          <h2 className="text-sm font-semibold">Pair an agent</h2>
-          <p className="mt-1 text-sm text-neutral-400">
-            Generate a code, then run this on the machine with the camera — the one
-            holding the credentials, not this browser.
-          </p>
+        {/*
+          This block used to print two terminal commands, one of which began
+          `cd ~/Sites/dronar/agent` - a path on the author's laptop. Pairing
+          from a terminal still works and is documented for unattended
+          installs, but it has not been the way anybody sets a sensor up since
+          the agent grew a setup page. What belongs here is the code itself.
+        */}
+        <section className="mt-10 border border-edge">
+          <h2 className="border-b border-edge px-6 py-4 text-[15px] text-bone">Pairing code</h2>
+          <div className="p-6">
+            <p className="max-w-[62ch] text-[14px] leading-relaxed text-slate">
+              Generate a code here, then paste it into the setup page of the agent running beside
+              your camera. That is the whole connection: the code is the only thing you carry from
+              this browser to that machine.
+            </p>
 
-          <p className="mt-3 text-xs font-medium text-neutral-400">Local install (venv)</p>
-          <pre className="mt-1 overflow-x-auto rounded-lg bg-neutral-950 p-3 text-xs text-neutral-300">
-{`cd ~/Sites/dronar/agent
-.venv/bin/python -m skyear.main --config config.yaml --data ./out --pair ${live[0]?.code ?? "CODE"}`}
-          </pre>
+            <button
+              onClick={createCode}
+              disabled={busy}
+              className="mt-5 bg-sodium px-4 py-2 text-[14px] font-medium text-night-deep hover:bg-sodium/90 disabled:opacity-50"
+            >
+              {busy ? "Generating…" : "Generate pairing code"}
+            </button>
 
-          <p className="mt-3 text-xs font-medium text-neutral-400">Docker (Synology, Raspberry Pi)</p>
-          <pre className="mt-1 overflow-x-auto rounded-lg bg-neutral-950 p-3 text-xs text-neutral-300">
-{`docker compose run --rm skyear --pair ${live[0]?.code ?? "CODE"}`}
-          </pre>
-          <p className="mt-2 text-xs text-neutral-500">
-            Use <code className="text-neutral-400">python3</code> or the venv interpreter —
-            plain <code className="text-neutral-400">python</code> does not exist on macOS. The code
-            is single-use and expires in {TTL_MINUTES} minutes; your camera address and password
-            never leave that machine.
-          </p>
+            {live.length > 0 && (
+              <ul className="mt-5 space-y-2">
+                {live.map((c) => (
+                  <LiveCode key={c.code} code={c.code} expiresAt={c.expires_at} now={now} />
+                ))}
+              </ul>
+            )}
 
-          <button
-            onClick={createCode}
-            disabled={busy}
-            className="mt-4 rounded-lg bg-sky-500 px-3 py-2 text-sm font-medium text-neutral-950 hover:bg-sky-400 disabled:opacity-50"
-          >
-            {busy ? "Generating…" : "Generate pairing code"}
-          </button>
-
-          {live.length > 0 && (
-            <ul className="mt-4 space-y-2">
-              {live.map((c) => (
-                <li
-                  key={c.code}
-                  className="flex items-center justify-between rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-3 py-2"
-                >
-                  <code className="font-mono text-lg tracking-[0.2em] text-emerald-300">{c.code}</code>
-                  <span className="text-xs text-neutral-400">
-                    expires {new Date(c.expires_at).toLocaleTimeString()}
-                  </span>
-                </li>
-              ))}
-            </ul>
-          )}
+            <p className="mt-5 max-w-[62ch] text-[13px] leading-relaxed text-slate">
+              One code pairs one device, once, within {TTL_MINUTES} minutes. Adding a second sensor
+              later, or reconnecting one you disconnected, needs a fresh code — generate another
+              then.
+            </p>
+            <p className="mt-3 max-w-[62ch] text-[12.5px] leading-relaxed text-slate-dim">
+              The code is the only thing SkyEar receives from you here. Your camera&rsquo;s address,
+              username and password are typed into the agent on your own network and stay there.
+            </p>
+            <p className="mt-4 text-[13px]">
+              <a href="/join" className="text-sodium hover:underline">
+                Setup instructions
+              </a>
+            </p>
+          </div>
         </section>
 
-        <section className="rounded-xl border border-white/10 bg-neutral-900/70 p-5">
-          <h2 className="text-sm font-semibold">Paired devices</h2>
-          <p className="mt-1 text-sm text-neutral-400">
-            Names appear on the public map, beside a position rounded to about a kilometre. Pick
-            something that describes the spot, not the person — &ldquo;the shed&rdquo;, not your
-            name and street.
-          </p>
-          <p className="mt-2 text-xs leading-relaxed text-neutral-500">
-            <span className="text-neutral-400">Remove from map</span> hides a camera and keeps
-            everything it recorded — including the aircraft it did not hear, which is the part
-            that makes the data worth anything.{" "}
-            <span className="text-neutral-400">Disconnect</span> stops an agent being accepted at
-            all. Only <span className="text-neutral-400">Delete permanently</span> destroys
-            measurements, and it cannot be undone.
-          </p>
-          {devices.length === 0 ? (
-            <p className="mt-2 text-sm text-neutral-500">None yet.</p>
-          ) : (
-            <ul className="mt-3 divide-y divide-white/5">
-              {devices.map((d) => {
-                const mine = sensors.filter((s) => s.device_id === d.id);
-                return (
-                  <li key={d.id} className="py-3 text-sm">
-                    <div className="flex items-center justify-between">
-                      <div>
-                        <p className="font-medium">{d.name}</p>
-                        <p className="text-xs text-neutral-500">
-                          {d.last_seen_at
-                            ? `last seen ${new Date(d.last_seen_at).toLocaleString()}`
-                            : "never seen"}
-                        </p>
+        <section className="mt-6 border border-edge">
+          <h2 className="border-b border-edge px-6 py-4 text-[15px] text-bone">Paired agents</h2>
+          <div className="p-6">
+            <p className="max-w-[62ch] text-[14px] leading-relaxed text-slate">
+              Names appear on the public map, beside a position rounded to about a kilometre. Pick
+              something that describes the spot, not the person — &ldquo;the shed&rdquo;, not your
+              name and street.
+            </p>
+            <p className="mt-3 max-w-[62ch] text-[12.5px] leading-relaxed text-slate-dim">
+              <span className="text-slate">Remove from map</span> hides a camera and keeps
+              everything it recorded — including the aircraft it did not hear, which is the part
+              that makes the data worth anything.{" "}
+              <span className="text-slate">Disconnect</span> stops an agent being accepted at all.
+              Only <span className="text-slate">Delete permanently</span> destroys measurements, and
+              it cannot be undone.
+            </p>
+
+            {devices.length === 0 ? (
+              <p className="mt-5 max-w-[62ch] text-[13.5px] leading-relaxed text-slate-dim">
+                No agents yet. Generate a code above, paste it into the agent&rsquo;s setup page,
+                and it will appear here once it checks in.
+              </p>
+            ) : (
+              <ul className="mt-5 divide-y divide-edge/60">
+                {devices.map((d) => {
+                  const mine = sensors.filter((s) => s.device_id === d.id);
+                  const active = d.status === "active";
+                  return (
+                    <li key={d.id} className="py-4 text-[14px] first:pt-0">
+                      <div className="flex items-center justify-between gap-4">
+                        <div className="min-w-0">
+                          <p className="truncate text-bone">{d.name}</p>
+                          <p className="mt-0.5 text-[12px] text-slate-dim">
+                            {d.last_seen_at
+                              ? `last seen ${new Date(d.last_seen_at).toLocaleString()}`
+                              : "never seen"}
+                          </p>
+                        </div>
+                        <span
+                          className={`shrink-0 border px-2 py-0.5 text-[11px] ${
+                            active
+                              ? "border-signal/40 text-signal"
+                              : "border-edge text-slate-dim"
+                          }`}
+                        >
+                          {d.status}
+                        </span>
                       </div>
-                      <span
-                        className={`rounded-full px-2 py-0.5 text-xs ${
-                          d.status === "active"
-                            ? "bg-emerald-500/15 text-emerald-300"
-                            : "bg-neutral-700/50 text-neutral-400"
-                        }`}
-                      >
-                        {d.status}
-                      </span>
-                    </div>
 
-                    {mine.length > 0 && (
-                      <ul className="mt-2 divide-y divide-white/5 border-t border-white/5">
-                        {mine.map((s) => (
-                          <SensorName
-                            key={s.id}
-                            sensor={s}
-                            onSave={saveLabel}
-                            onRetire={retireSensor}
-                          />
-                        ))}
-                      </ul>
-                    )}
+                      {mine.length > 0 && (
+                        <ul className="mt-3 divide-y divide-edge/60 border-t border-edge/60">
+                          {mine.map((s) => (
+                            <SensorName
+                              key={s.id}
+                              sensor={s}
+                              onSave={saveLabel}
+                              onRetire={retireSensor}
+                            />
+                          ))}
+                        </ul>
+                      )}
 
-                    <div className="mt-3 flex flex-wrap items-center gap-3 border-t border-white/5 pt-3">
-                      <button
-                        onClick={() => retireDevice(d.id, d.status === "active")}
-                        className="text-xs text-neutral-400 hover:text-amber-300"
-                      >
-                        {d.status === "active"
-                          ? "Disconnect this agent"
-                          : "Reconnect this agent"}
-                      </button>
-                      {confirmDelete === d.id ? (
-                        <span className="flex flex-wrap items-center gap-2 text-xs">
-                          <span className="text-red-300">
-                            Delete {d.name} and every measurement it made?
+                      <div className="mt-3 flex flex-wrap items-center gap-4 border-t border-edge/60 pt-3">
+                        <button
+                          onClick={() => retireDevice(d.id, active)}
+                          className="text-[12px] text-slate hover:text-sodium"
+                        >
+                          {active ? "Disconnect this agent" : "Reconnect this agent"}
+                        </button>
+                        {confirmDelete === d.id ? (
+                          <span className="flex flex-wrap items-center gap-3 text-[12px]">
+                            <span className="text-bad">
+                              Delete {d.name} and every measurement it made?
+                            </span>
+                            <button
+                              onClick={() => deleteDevice(d.id)}
+                              className="border border-bad/50 px-2 py-1 text-bad hover:bg-bad/10"
+                            >
+                              Delete permanently
+                            </button>
+                            <button
+                              onClick={() => setConfirmDelete(null)}
+                              className="text-slate hover:text-bone"
+                            >
+                              Cancel
+                            </button>
                           </span>
+                        ) : (
                           <button
-                            onClick={() => deleteDevice(d.id)}
-                            className="rounded border border-red-500/50 px-2 py-1 text-red-300 hover:bg-red-500/10"
+                            onClick={() => setConfirmDelete(d.id)}
+                            className="text-[12px] text-slate-dim hover:text-bad"
                           >
                             Delete permanently
                           </button>
-                          <button
-                            onClick={() => setConfirmDelete(null)}
-                            className="text-neutral-400 hover:text-neutral-200"
-                          >
-                            Cancel
-                          </button>
-                        </span>
-                      ) : (
-                        <button
-                          onClick={() => setConfirmDelete(d.id)}
-                          className="text-xs text-neutral-600 hover:text-red-400"
-                        >
-                          Delete permanently
-                        </button>
-                      )}
-                    </div>
-                  </li>
-                );
-              })}
-            </ul>
-          )}
+                        )}
+                      </div>
+                    </li>
+                  );
+                })}
+              </ul>
+            )}
+          </div>
         </section>
 
-        {error && <p className="text-sm text-red-400">{error}</p>}
+        {error && <p className="mt-6 text-[13.5px] text-bad">{error}</p>}
       </div>
     </main>
   );

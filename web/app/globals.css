@@ -99,6 +99,20 @@ body {
   to   { transform: rotate(360deg); opacity: 0.45; }
 }
 
+/*
+ * One event leaving the network, on the boundary diagram. The page's only
+ * ambient motion: it states the claim the diagram is making - the line runs
+ * one way - which a static arrowhead only implies.
+ */
+@keyframes outbound {
+  0%   { transform: translateY(0); opacity: 0; }
+  12%  { opacity: 1; }
+  80%  { opacity: 1; }
+  100% { transform: translateY(186px); opacity: 0; }
+}
+
+.nb-outbound { animation: outbound 4.2s cubic-bezier(0.4, 0, 0.6, 1) infinite; }
+
 .ring-arrive { animation: arrive 3.4s cubic-bezier(0.3, 0, 0.2, 1) infinite; }
 /* Wavefronts arrive faster when there is more to hear. */
 .ring-rising  { animation-duration: 2s; }
@@ -117,7 +131,8 @@ body {
   .bearing-ray,
   .breathe,
   .sustain,
-  .unaccounted-ring {
+  .unaccounted-ring,
+  .nb-outbound {
     animation: none;
   }
   .ring-arrive { opacity: 0.28; }

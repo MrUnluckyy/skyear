@@ -189,6 +189,13 @@ def test_saving_returns_a_cookie_that_keeps_the_browser_authorised():
 
 
 def test_the_lock_message_says_how_to_get_back_in(agent):
+    """It must name a recovery the reader can actually perform.
+
+    It used to say `docker exec skyear cat /data/setup_token`, which is wrong
+    on Home Assistant - the container is addon_<hash>_skyear, and reaching a
+    shell at all means installing a second add-on and disabling its protection
+    mode. The token is printed at startup now, so the log is the answer.
+    """
     import urllib.error
     _, _, base = agent
     post(base, "/api/save", {"camera": CAMERA, "secret": "hunter2"})
@@ -197,8 +204,75 @@ def test_the_lock_message_says_how_to_get_back_in(agent):
         raise AssertionError("should be locked")
     except urllib.error.HTTPError as e:
         body = json.loads(e.read())
-        assert "setup_token" in body["error"]
-        assert "docker exec" in body["error"]
+        assert "setup token" in body["error"]
+        assert "log" in body["error"]
+        assert "docker exec" not in body["error"], "that command is wrong on Home Assistant"
+
+
+# --- who is trusted, and why ------------------------------------------
+
+def test_an_addon_needs_no_token(tmp_path, monkeypatch):
+    """Home Assistant has already signed the person in.
+
+    The add-on publishes no port: the Supervisor's ingress proxy is the only
+    route to it, and it proxies only for an authenticated user. A second lock
+    behind that one protected nothing and locked people out of their own
+    agent.
+    """
+    monkeypatch.setenv("SUPERVISOR_TOKEN", "supervisor-gave-us-this")
+    httpd = serve(tmp_path, {}, port=0, host="127.0.0.1")
+    base = f"http://127.0.0.1:{httpd.server_address[1]}"
+    try:
+        post(base, "/api/save", {"camera": CAMERA, "secret": "hunter2"})
+        # A second write, from a browser holding no cookie and no token.
+        status, _ = post(base, "/api/save", {"camera": CAMERA, "secret": "changed"})
+        assert status == 200
+    finally:
+        httpd.shutdown()
+
+
+def test_the_older_supervisor_variable_is_recognised(tmp_path, monkeypatch):
+    """Installs upgraded rather than reinstalled still carry HASSIO_TOKEN."""
+    from skyear.setup_server import running_as_addon
+
+    monkeypatch.delenv("SUPERVISOR_TOKEN", raising=False)
+    monkeypatch.setenv("HASSIO_TOKEN", "older-name")
+    assert running_as_addon()
+
+
+def test_it_fails_closed_when_it_cannot_tell(tmp_path, monkeypatch):
+    """No Supervisor in the environment means the port may well be published,
+    so the token is still required. Guessing 'probably safe' here would open
+    the clip endpoint to the whole local network."""
+    from skyear.setup_server import running_as_addon
+
+    for name in ("SUPERVISOR_TOKEN", "HASSIO_TOKEN"):
+        monkeypatch.delenv(name, raising=False)
+    assert not running_as_addon()
+
+
+def test_standalone_prints_the_token_so_a_lockout_is_recoverable(tmp_path, monkeypatch, caplog):
+    """The token existed with no way to read it from the one surface a user
+    has. Printing it grants nothing: reading this log needs more access than
+    the page it guards."""
+    for name in ("SUPERVISOR_TOKEN", "HASSIO_TOKEN"):
+        monkeypatch.delenv(name, raising=False)
+    with caplog.at_level("INFO", logger="setup"):
+        httpd = serve(tmp_path, {}, port=0, host="127.0.0.1")
+    httpd.shutdown()
+    blob = "\n".join(r.getMessage() for r in caplog.records)
+    assert config_store.setup_token(tmp_path) in blob
+
+
+def test_an_addon_does_not_print_a_token(tmp_path, monkeypatch, caplog):
+    """There is none in play, so printing one would only invite confusion."""
+    monkeypatch.setenv("SUPERVISOR_TOKEN", "supervisor-gave-us-this")
+    with caplog.at_level("INFO", logger="setup"):
+        httpd = serve(tmp_path, {}, port=0, host="127.0.0.1")
+    httpd.shutdown()
+    blob = "\n".join(r.getMessage() for r in caplog.records)
+    assert "setup token:" not in blob
+    assert "Home Assistant" in blob
 
 
 def test_pairing_works_with_no_cloud_url_configured(agent, monkeypatch):

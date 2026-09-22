@@ -1,4 +1,4 @@
-import Link from "next/link";
+import SiteNav from "@/components/SiteNav";
 
 /**
  * What every graphic on the map means.
@@ -48,17 +48,7 @@ export default function Reading() {
   return (
     <main className="min-h-dvh bg-night-deep px-6 py-12 text-bone">
       <div className="mx-auto max-w-3xl">
-        <nav className="flex gap-4 text-[13px]">
-          <Link href="/" className="text-slate hover:text-sodium">
-            Map
-          </Link>
-          <Link href="/join" className="text-slate hover:text-sodium">
-            Become a sensor
-          </Link>
-          <Link href="/privacy" className="text-slate hover:text-sodium">
-            Privacy
-          </Link>
-        </nav>
+        <SiteNav current="/reading" />
 
         <h1 className="mt-8 text-[30px] leading-tight tracking-tight">Reading the map</h1>
         <p className="mt-3 max-w-[68ch] text-[15px] leading-relaxed text-slate">

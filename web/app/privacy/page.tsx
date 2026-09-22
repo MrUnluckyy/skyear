@@ -1,6 +1,9 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 
+import NetworkBoundary from "@/components/NetworkBoundary";
+import SiteNav from "@/components/SiteNav";
+
 /**
  * What the project holds about people, in the terms it actually works in.
  *
@@ -38,17 +41,7 @@ export default function Privacy() {
   return (
     <main className="min-h-dvh bg-night-deep px-6 py-12 text-bone">
       <div className="mx-auto max-w-3xl">
-        <nav className="flex gap-4 text-[13px]">
-          <Link href="/" className="text-slate hover:text-sodium">
-            Map
-          </Link>
-          <Link href="/reading" className="text-slate hover:text-sodium">
-            How to read this
-          </Link>
-          <Link href="/join" className="text-slate hover:text-sodium">
-            Become a sensor
-          </Link>
-        </nav>
+        <SiteNav current="/privacy" />
 
         <h1 className="mt-8 text-[30px] leading-tight tracking-tight">Privacy</h1>
         <p className="mt-3 max-w-[68ch] text-[14px] leading-relaxed text-slate">
@@ -90,6 +83,12 @@ export default function Privacy() {
           <p className="text-bone">
             Audio never leaves your machine. The camera password never leaves your machine.
           </p>
+          {/* The same drawing as the setup guide. The claim above is the one
+              people most need to believe, and it is easier to check a shape
+              than to take a sentence on trust. */}
+          <div className="py-3">
+            <NetworkBoundary />
+          </div>
           <p>
             The agent runs on your own hardware, connects to your own camera on your own network,
             and uploads only what it concluded: the time a sound started, how long it lasted, how

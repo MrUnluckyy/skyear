@@ -1,6 +1,9 @@
 import type { Metadata } from "next";
+import Link from "next/link";
 
+import NetworkBoundary from "@/components/NetworkBoundary";
 import SetupChooser from "@/components/SetupChooser";
+import SiteNav from "@/components/SiteNav";
 
 export const metadata: Metadata = {
   // The root layout's template appends " · SkyEar"; naming it here too gave
@@ -15,12 +18,12 @@ type Where = "browser" | "machine";
 type Step = {
   where: Where;
   title: string;
-  body: string;
-  code?: string;
-  /** Browser steps link rather than printing a URL: the reader is already in a
-   *  browser, and a hardcoded domain is wrong on every other deployment. */
-  link?: { href: string; label: string };
+  /** The instruction, on its own. Never mixed with the reasoning. */
+  action: string;
+  /** Why it matters. Skippable by anyone in a hurry, kept for everyone else. */
+  why?: string;
   expect?: string;
+  link?: { href: string; label: string };
   stuck?: { problem: string; fix: string }[];
 };
 
@@ -28,49 +31,88 @@ type Step = {
  * Setup spans two places - a browser and the machine next to the camera - and
  * mixing them up is the thing that actually derails people. Every step is
  * labelled with where it happens.
+ *
+ * Each step separates the instruction from the reasoning. The page used to run
+ * them together in one paragraph, which meant the sentence telling you what to
+ * press sat fourth in a block of prose about geometry. The reasoning is worth
+ * keeping - it is why anyone trusts the result - but it is not what you read
+ * while your other hand is on the camera.
  */
 const STEPS: Step[] = [
   {
     where: "browser",
     title: "Tell it about your camera",
-    body: "On the setup page: pick the make, type the camera's address on your network, and enter the username and password you use in its own app. Press Test this camera. This is the moment that decides whether your camera can be a sensor at all, and it needs no account and no sign-up.",
-    expect: `Audio found — aac at 16000 Hz. This camera can be a sensor.`,
+    action:
+      "On the setup page: pick the make, type the camera's address on your network, and enter the username and password you use in its own app. Press Test this camera.",
+    why: "This is the moment that decides whether your camera can be a sensor at all, and it needs no account and no sign-up.",
+    expect: "Audio found — aac at 16000 Hz. This camera can be a sensor.",
     stuck: [
-      { problem: "\u201cThe camera rejected that username or password.\u201d", fix: "Reolink usually wants admin and the password you set in its app, not your Reolink cloud login." },
-      { problem: "\u201cCould not reach the camera.\u201d", fix: "Check the address, and that RTSP is switched on in the camera settings. Most cameras have it off by default." },
-      { problem: "\u201cThis camera streams video but no audio.\u201d", fix: "That model has no microphone, or it is disabled in the camera's settings. Check there first; if there is no microphone, this camera cannot be a sensor." },
-      { problem: "The setup page does not load at all.", fix: "The agent log prints the exact address. In Docker it sometimes prints the container's own address, so use the machine's instead." },
+      {
+        problem: "“The camera rejected that username or password.”",
+        fix: "Reolink usually wants admin and the password you set in its app, not your Reolink cloud login.",
+      },
+      {
+        problem: "“Could not reach the camera.”",
+        fix: "Check the address, and that RTSP is switched on in the camera settings. Most cameras have it off by default.",
+      },
+      {
+        problem: "“This camera streams video but no audio.”",
+        fix: "That model has no microphone, or it is disabled in the camera's settings. Check there first; if there is no microphone, this camera cannot be a sensor.",
+      },
+      {
+        problem: "The setup page does not load at all.",
+        fix: "The agent log prints the exact address. In Docker it sometimes prints the container's own address, so use the machine's instead.",
+      },
     ],
   },
   {
     where: "browser",
     title: "Set where it is listening from",
-    body: "Press Use my current location, or type the coordinates. The ground elevation is looked up for you; the mount height is roughly how high the camera is off the ground. Position matters because matching a sound to an aircraft is geometry — the distance decides how long the sound took to arrive.",
+    action: "Press Use my current location, or type the coordinates. Set roughly how high the camera is off the ground.",
+    why: "The ground elevation is looked up for you. Position matters because matching a sound to an aircraft is geometry — the distance decides how long the sound took to arrive.",
     expect: "Latitude and longitude filled in, and an elevation that looks plausible for where you are.",
     stuck: [
-      { problem: "The browser refuses to share a location.", fix: "It only works on https or localhost. Type the coordinates instead — right-click your roof in Google Maps and copy the pair." },
+      {
+        problem: "The browser refuses to share a location.",
+        fix: "It only works on https or localhost. Type the coordinates instead — right-click your roof in Google Maps and copy the pair.",
+      },
     ],
   },
   {
     where: "browser",
     title: "Create an account and connect",
-    body: "Only now, once you know the camera works. Enter your email, click the one-time link, press Generate pairing code, and paste that code into the setup page. Then press Save and connect.",
+    action:
+      "Enter your email, click the one-time link, press Generate pairing code, and paste that code into the setup page. Then press Save and connect.",
+    why: "Only now, once you know the camera works.",
     link: { href: "/login", label: "Sign in" },
     expect: "Connected. Restart the agent and your sensor appears on the map within a minute.",
     stuck: [
-      { problem: "No email after a minute.", fix: "Check spam — the first message from a new sender usually lands there. The link is single-use and expires in an hour." },
-      { problem: "The code is rejected.", fix: "Codes expire after 15 minutes and work once. Generate another." },
+      {
+        problem: "No email after a minute.",
+        fix: "Check spam — the first message from a new sender usually lands there. The link is single-use and expires in an hour.",
+      },
+      {
+        problem: "The code is rejected.",
+        fix: "Codes expire after 15 minutes and work once. Generate another.",
+      },
     ],
   },
   {
     where: "browser",
     title: "Watch it start listening",
-    body: "Restart the agent so it picks up the camera, then open the map. Your sensor appears with wavefronts collapsing into it, and starts recording every aircraft that passes — heard or not. The level meter on the setup page moves whenever there is sound, which is the quickest way to confirm the microphone is really reaching it.",
+    action: "Restart the agent so it picks up the camera, then open the map.",
+    why: "Your sensor appears with wavefronts collapsing into it, and starts recording every aircraft that passes — heard or not. The level meter on the setup page moves whenever there is sound, which is the quickest way to confirm the microphone is really reaching it.",
     link: { href: "/", label: "Open the map" },
     expect: "A dot where your camera is, labelled listening, and a rising count of aircraft.",
     stuck: [
-      { problem: "The sensor does not appear.", fix: "The agent uploads every 10 seconds, but only once it has something to say. Near an airport give it a few minutes; elsewhere longer." },
-      { problem: "It says no sound arriving.", fix: "The camera streams audio but the agent is not receiving it. Restart the agent; if it persists, re-run Test this camera." },
+      {
+        problem: "The sensor does not appear.",
+        fix: "The agent uploads every 10 seconds, but only once it has something to say. Near an airport give it a few minutes; elsewhere longer.",
+      },
+      {
+        problem: "It says no sound arriving.",
+        fix: "The camera streams audio but the agent is not receiving it. Restart the agent; if it persists, re-run Test this camera.",
+      },
     ],
   },
 ];
@@ -87,6 +129,13 @@ const STAYS = [
   "Video — none is ever read, only the audio track",
   "Audio recordings, unless you opt in per clip",
   "Your exact coordinates",
+];
+
+const NEEDED = [
+  "A camera with a microphone, on your own network",
+  "Its address, and a username and password for it",
+  "A machine that stays on and can reach the camera — a NAS, a Pi, a spare computer",
+  "Roughly how high the camera is mounted",
 ];
 
 function Where({ where }: { where: Where }) {
@@ -106,35 +155,51 @@ function Where({ where }: { where: Where }) {
   );
 }
 
+/**
+ * Detail that only some readers need, folded away rather than deleted.
+ *
+ * Troubleshooting and camera-specific quirks were the bulk of this page's
+ * height, shown to everybody at all times, including the people for whom
+ * nothing had gone wrong. Native disclosure keeps every word one click away,
+ * works without JavaScript, and is a control screen readers already announce.
+ */
+function Detail({ summary, children }: { summary: string; children: React.ReactNode }) {
+  return (
+    <details className="group border-t border-edge/70 py-3">
+      <summary className="cursor-pointer text-[13px] text-slate marker:text-slate-dim hover:text-sodium">
+        {summary}
+      </summary>
+      <div className="mt-3 space-y-3">{children}</div>
+    </details>
+  );
+}
+
 function StepBlock({ index, step }: { index: number; step: Step }) {
   return (
-    <li className="grid gap-4 border-t border-edge py-9 md:grid-cols-[3rem_1fr]">
-      <span className="font-mono text-[26px] leading-none text-slate-dim">
-        {String(index + 1).padStart(2, "0")}
-      </span>
+    <li className="grid gap-4 border-t border-edge py-9 md:grid-cols-[2.5rem_1fr]">
+      {/* Not mono: this file reserves the mono face for measured values, and a
+          step number is a label. */}
+      <span className="text-[22px] leading-none text-slate-dim">{index + 1}</span>
 
       <div className="min-w-0">
         <Where where={step.where} />
-        <h3 className="mt-3 text-[18px] text-bone">{step.title}</h3>
-        <p className="mt-2 max-w-[62ch] text-[14px] leading-relaxed text-slate">{step.body}</p>
+        <h3 className="mt-3 text-[19px] text-bone">{step.title}</h3>
+        <p className="mt-2 max-w-[60ch] text-[15px] leading-relaxed text-bone/90">{step.action}</p>
+        {step.why && (
+          <p className="mt-2 max-w-[62ch] text-[13.5px] leading-relaxed text-slate">{step.why}</p>
+        )}
 
         {step.link && (
-          <a
+          <Link
             href={step.link.href}
             className="mt-4 inline-block border border-sodium/50 px-3 py-1.5 text-[13px] text-sodium hover:bg-sodium/10"
           >
             {step.link.label}
-          </a>
-        )}
-
-        {step.code && (
-          <pre className="scroll-thin mt-4 overflow-x-auto border border-edge bg-night-deep p-4 font-mono text-[12.5px] leading-relaxed text-frost/90">
-            {step.code}
-          </pre>
+          </Link>
         )}
 
         {step.expect && (
-          <div className="mt-3 border-l-2 border-signal/50 pl-4">
+          <div className="mt-4 border-l-2 border-signal/50 pl-4">
             <p className="text-[12px] text-signal/90">What you should see</p>
             <pre className="scroll-thin mt-1 overflow-x-auto whitespace-pre-wrap font-mono text-[12px] leading-relaxed text-slate">
               {step.expect}
@@ -143,14 +208,18 @@ function StepBlock({ index, step }: { index: number; step: Step }) {
         )}
 
         {step.stuck && (
-          <dl className="mt-4 space-y-2">
-            {step.stuck.map((s) => (
-              <div key={s.problem} className="text-[12.5px] leading-relaxed">
-                <dt className="text-slate-dim">{s.problem}</dt>
-                <dd className="text-slate">{s.fix}</dd>
-              </div>
-            ))}
-          </dl>
+          <div className="mt-4 max-w-[64ch]">
+            <Detail summary={`If that is not what happened (${step.stuck.length})`}>
+              <dl className="space-y-3">
+                {step.stuck.map((s) => (
+                  <div key={s.problem} className="text-[13px] leading-relaxed">
+                    <dt className="text-slate-dim">{s.problem}</dt>
+                    <dd className="text-slate">{s.fix}</dd>
+                  </div>
+                ))}
+              </dl>
+            </Detail>
+          </div>
         )}
       </div>
     </li>
@@ -161,14 +230,9 @@ export default function Join() {
   return (
     <main className="min-h-dvh bg-night-deep">
       <div className="mx-auto max-w-3xl px-6 py-16 md:px-10">
-        <nav className="mb-14 flex items-center justify-between text-[13px]">
-          <a href="/" className="text-slate hover:text-sodium">
-            SkyEar
-          </a>
-          <a href="/devices" className="text-slate hover:text-sodium">
-            Your sensors
-          </a>
-        </nav>
+        <div className="mb-14">
+          <SiteNav current="/join" />
+        </div>
 
         <header>
           <h1 className="max-w-[20ch] text-[40px] leading-[1.08] tracking-tight text-bone md:text-[52px]">
@@ -186,8 +250,56 @@ export default function Join() {
           </p>
         </header>
 
-        {/* The single most common source of confusion, addressed before step 1. */}
+        {/*
+          Raised to sit directly under the hero.
+          This is the first question anyone sensible asks about pointing a
+          microphone at their own home, and it used to be answered two thirds
+          of the way down, below a section about testing with a speaker.
+        */}
         <section className="mt-14 border border-edge">
+          <h2 className="border-b border-edge px-6 py-4 text-[15px] text-bone">
+            Nothing about your camera leaves your network
+          </h2>
+
+          <div className="grid gap-8 p-6 md:grid-cols-[360px_1fr]">
+            <NetworkBoundary />
+
+            <div className="min-w-0">
+              <p className="text-[13px] text-frost">Sent to SkyEar</p>
+              <ul className="mt-3 space-y-2">
+                {LEAVES.map((item) => (
+                  <li key={item} className="text-[13.5px] leading-relaxed text-slate">
+                    {item}
+                  </li>
+                ))}
+              </ul>
+
+              <p className="mt-6 text-[13px] text-sodium">Never leaves your machine</p>
+              <ul className="mt-3 space-y-2">
+                {STAYS.map((item) => (
+                  <li key={item} className="text-[13.5px] leading-relaxed text-slate">
+                    {item}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          </div>
+
+          <p className="border-t border-edge px-6 py-4 text-[12.5px] leading-relaxed text-slate-dim">
+            This is architectural, not a policy promise. The agent runs inside your network and
+            pushes events out; nothing reaches in. There is no field anywhere on this site that asks
+            for a camera address or password, because the servers could not use one — they cannot
+            route to a private address, and a credential store an operator can decrypt is a target
+            worth attacking.{" "}
+            <Link href="/privacy" className="text-slate hover:text-sodium">
+              What is stored, and how to have it deleted
+            </Link>
+            .
+          </p>
+        </section>
+
+        {/* The single most common source of confusion, addressed before step 1. */}
+        <section className="mt-6 border border-edge">
           <h2 className="border-b border-edge px-6 py-4 text-[15px] text-bone">
             You will be working in two places
           </h2>
@@ -216,61 +328,55 @@ export default function Join() {
         <section className="mt-16">
           <h2 className="text-[15px] text-bone">Before you start</h2>
           <ul className="mt-4 grid gap-x-8 gap-y-2 md:grid-cols-2">
-            {[
-              "A camera with a microphone, on your own network",
-              "Its address, and a username and password for it",
-              "A machine that stays on and can reach the camera — a NAS, a Pi, a spare computer",
-              "Roughly how high the camera is mounted",
-            ].map((item) => (
+            {NEEDED.map((item) => (
               <li key={item} className="text-[14px] leading-relaxed text-slate">
                 {item}
               </li>
             ))}
           </ul>
-        </section>
+          <div className="mt-5 max-w-[64ch]">
+            <Detail summary="What to have ready for your particular camera">
+              <div>
+                <p className="text-[13px] text-frost">Reolink, Hikvision, Dahua</p>
+                <p className="mt-2 max-w-[62ch] text-[13px] leading-relaxed text-slate">
+                  Its address on your network, a username and a password. The setup page builds the
+                  rest and tests it before you commit. Make sure RTSP is switched on in the camera
+                  settings, usually under Network or Advanced.
+                </p>
+              </div>
 
-        <section className="mt-16 border border-edge">
-          <h2 className="border-b border-edge px-6 py-4 text-[15px] text-bone">
-            What to have ready for your camera
-          </h2>
-
-          <div className="border-b border-edge p-6">
-            <p className="text-[13px] text-frost">Reolink, Hikvision, Dahua</p>
-            <p className="mt-2 max-w-[62ch] text-[13px] leading-relaxed text-slate">
-              Its address on your network, a username and a password. The setup page builds the
-              rest and tests it before you commit. Make sure RTSP is switched on in the camera
-              settings, usually under Network or Advanced.
-            </p>
-          </div>
-
-          <div className="border-b border-edge p-6">
-            <p className="text-[13px] text-sodium">Ubiquiti UniFi Protect</p>
-            <p className="mt-2 max-w-[62ch] text-[13px] leading-relaxed text-slate">
-              Different from the rest, so the form asks for different things. The stream comes from
-              your <strong className="font-normal text-bone">NVR or UDM</strong>, not the camera,
-              and there is no username or password — a token in the URL is the credential.
-            </p>
-            <p className="mt-3 max-w-[62ch] text-[13px] leading-relaxed text-slate">
-              In Protect, open the camera → Settings → Advanced → enable{" "}
-              <strong className="font-normal text-bone">RTSP</strong> for any one quality. Copy the
-              URL it shows and keep the part after the last slash:
-            </p>
-            <pre className="scroll-thin mt-3 overflow-x-auto border border-edge bg-night-deep p-4 font-mono text-[12.5px] leading-relaxed text-frost/90">
+              <div className="pt-2">
+                <p className="text-[13px] text-sodium">Ubiquiti UniFi Protect</p>
+                <p className="mt-2 max-w-[62ch] text-[13px] leading-relaxed text-slate">
+                  Different from the rest, so the form asks for different things. The stream comes
+                  from your <strong className="font-normal text-bone">NVR or UDM</strong>, not the
+                  camera, and there is no username or password — a token in the URL is the
+                  credential.
+                </p>
+                <p className="mt-3 max-w-[62ch] text-[13px] leading-relaxed text-slate">
+                  In Protect, open the camera → Settings → Advanced → enable{" "}
+                  <strong className="font-normal text-bone">RTSP</strong> for any one quality. Copy
+                  the URL it shows and keep the part after the last slash:
+                </p>
+                <pre className="scroll-thin mt-3 overflow-x-auto border border-edge bg-night-deep p-4 font-mono text-[12.5px] leading-relaxed text-frost/90">
 {`rtsps://192.168.1.1:7441/aBcDeF123456?enableSrtp
                          └── paste this part ──┘`}
-            </pre>
-            <p className="mt-3 max-w-[62ch] text-[12px] leading-relaxed text-slate-dim">
-              Protect issues a new token if you turn RTSP off and on again, which silently stops
-              the stream until you paste the new one.
-            </p>
-          </div>
+                </pre>
+                <p className="mt-3 max-w-[62ch] text-[12px] leading-relaxed text-slate-dim">
+                  Protect issues a new token if you turn RTSP off and on again, which silently stops
+                  the stream until you paste the new one.
+                </p>
+              </div>
 
-          <div className="p-6">
-            <p className="text-[13px] text-frost">Does it even have a microphone?</p>
-            <p className="mt-2 max-w-[62ch] text-[13px] leading-relaxed text-slate">
-              Many cameras do not, and the box rarely says. You do not need to find out in advance —
-              the setup page tests the stream and tells you plainly whether there is audio on it.
-            </p>
+              <div className="pt-2">
+                <p className="text-[13px] text-frost">Does it even have a microphone?</p>
+                <p className="mt-2 max-w-[62ch] text-[13px] leading-relaxed text-slate">
+                  Many cameras do not, and the box rarely says. You do not need to find out in
+                  advance — the setup page tests the stream and tells you plainly whether there is
+                  audio on it.
+                </p>
+              </div>
+            </Detail>
           </div>
         </section>
 
@@ -336,42 +442,7 @@ export default function Join() {
           </div>
         </section>
 
-        <section className="mt-6 border border-edge">
-          <h2 className="border-b border-edge px-6 py-4 text-[15px] text-bone">
-            What crosses your network boundary
-          </h2>
-          <div className="grid md:grid-cols-2">
-            <div className="border-b border-edge p-6 md:border-b-0 md:border-r">
-              <p className="text-[13px] text-sodium">Sent to SkyEar</p>
-              <ul className="mt-3 space-y-2">
-                {LEAVES.map((item) => (
-                  <li key={item} className="text-[13px] leading-relaxed text-slate">
-                    {item}
-                  </li>
-                ))}
-              </ul>
-            </div>
-            <div className="p-6">
-              <p className="text-[13px] text-frost">Never leaves your machine</p>
-              <ul className="mt-3 space-y-2">
-                {STAYS.map((item) => (
-                  <li key={item} className="text-[13px] leading-relaxed text-slate">
-                    {item}
-                  </li>
-                ))}
-              </ul>
-            </div>
-          </div>
-          <p className="border-t border-edge px-6 py-4 text-[12px] leading-relaxed text-slate-dim">
-            This is architectural, not a policy promise. The agent runs inside your network and
-            pushes events out; nothing reaches in. There is no field anywhere on this site that asks
-            for a camera address or password, because the servers could not use one — they cannot
-            route to a private address, and a credential store an operator can decrypt is a target
-            worth attacking.
-          </p>
-        </section>
-
-        <section className="mt-10 border border-edge p-6">
+        <section className="mt-6 border border-edge p-6">
           <h2 className="text-[15px] text-bone">Where this actually stands</h2>
           <p className="mt-3 max-w-[64ch] text-[14px] leading-relaxed text-slate">
             Early, and measured rather than claimed. A single sensor near Vilnius airport currently
@@ -392,15 +463,15 @@ export default function Join() {
         </section>
 
         <section className="mt-12 flex flex-wrap items-center gap-4 border-t border-edge pt-8">
-          <a
+          <Link
             href="/login"
             className="bg-sodium px-4 py-2 text-[14px] font-medium text-night-deep hover:bg-sodium/90"
           >
             Start with step one
-          </a>
-          <a href="/" className="text-[14px] text-slate hover:text-sodium">
+          </Link>
+          <Link href="/" className="text-[14px] text-slate hover:text-sodium">
             See what the network is hearing
-          </a>
+          </Link>
         </section>
 
         <footer className="mt-16 flex flex-wrap items-center justify-between gap-3 border-t border-edge pt-6 text-[12px] leading-relaxed text-slate-dim">

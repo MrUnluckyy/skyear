@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import re
 import subprocess
 import threading
@@ -28,6 +29,35 @@ from .uploader import CloudError, coarse, pair
 log = logging.getLogger("setup")
 
 ELEVATION_API = "https://api.open-meteo.com/v1/elevation?latitude={lat}&longitude={lon}"
+
+# Environment variables the Supervisor sets in every Home Assistant add-on
+# container. HASSIO_TOKEN is the older name and still appears on installs that
+# have been upgraded rather than reinstalled.
+SUPERVISOR_ENV = ("SUPERVISOR_TOKEN", "HASSIO_TOKEN")
+
+
+def running_as_addon() -> bool:
+    """Whether this process was started by Home Assistant's Supervisor.
+
+    WHY THIS DECIDES WHO IS TRUSTED
+
+    The add-on declares `ingress: true` and no `ports:`, so its HTTP port is
+    never published to the network. The only way a request reaches it is
+    through the Supervisor's ingress proxy, and the Supervisor proxies only
+    for a signed-in Home Assistant user. Home Assistant has therefore already
+    done the authentication, and asking for a setup token on top of it was
+    asking people to authenticate twice to the same machine - with the second
+    factor recoverable only by installing another add-on and turning its
+    protection mode off. That is how someone ends up locked out of their own
+    agent.
+
+    An environment variable rather than a request header, deliberately. A
+    header is a claim the caller makes, so anything able to reach the port
+    could simply assert it; this is a fact about how the process was started,
+    which a caller cannot influence. It fails closed: an agent that cannot
+    tell where it is running keeps asking for the token.
+    """
+    return any(os.environ.get(name) for name in SUPERVISOR_ENV)
 
 
 def probe_camera(cam: dict, secret: str, timeout: int = 25) -> dict:
@@ -94,6 +124,7 @@ class SetupHandler(BaseHTTPRequestHandler):
     live: dict
     page: str
     label_page: str
+    addon: bool = False
 
     def log_message(self, fmt, *args):
         log.debug(fmt, *args)
@@ -196,7 +227,14 @@ class SetupHandler(BaseHTTPRequestHandler):
 
         A brand-new agent has nothing worth protecting, and demanding a token
         from a log file would defeat the purpose of a setup page. Once a camera
-        password is stored, that stops being true.
+        password is stored, that stops being true: the setup server can then
+        rewrite the camera, pair the agent to somebody else's account, and hand
+        out recordings of the owner's property.
+
+        Unless Home Assistant is already doing it. See running_as_addon() - the
+        port is unpublished and the Supervisor only proxies for a signed-in
+        user, so the token would be a second lock on the inside of a locked
+        door, and the one people were getting stuck behind.
 
         The token is accepted from a cookie as well as the query string, and
         saving sets that cookie. Without it, pressing Save locked the person
@@ -204,6 +242,8 @@ class SetupHandler(BaseHTTPRequestHandler):
         recovery buried in a file inside the container.
         """
         if not config_store.is_configured(self.data_dir):
+            return True
+        if self.addon:
             return True
         want = config_store.setup_token(self.data_dir)
         query = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query).get("t", [""])[0]
@@ -299,9 +339,10 @@ class SetupHandler(BaseHTTPRequestHandler):
         if not self._authorised():
             return self._json({
                 "error": "This agent is already configured, so setup is locked to the "
-                         "browser that set it up. To unlock another browser, open this page "
-                         "with ?t= followed by the token in data/setup_token "
-                         "(in Docker: docker exec skyear cat /data/setup_token).",
+                         "browser that set it up. The agent prints its setup token when it "
+                         "starts: look for \"setup token\" in the log (in Docker: "
+                         "docker logs skyear). Open this page with ?t= followed by that "
+                         "token to unlock this browser.",
             }, 403)
         body = self._body()
 
@@ -425,13 +466,27 @@ def lan_address() -> str | None:
 def serve(data_dir: Path, live: dict, port: int = 8088, host: str = "0.0.0.0") -> ThreadingHTTPServer:
     page = (Path(__file__).parent / "setup.html").read_text()
     label_page = (Path(__file__).parent / "label.html").read_text()
+    addon = running_as_addon()
     handler = type("Bound", (SetupHandler,),
                    {"data_dir": Path(data_dir), "live": live, "page": page,
-                    "label_page": label_page})
+                    "label_page": label_page, "addon": addon})
     httpd = ThreadingHTTPServer((host, port), handler)
     threading.Thread(target=httpd.serve_forever, daemon=True, name="setup").start()
     ip = lan_address()
     log.info("setup page: http://%s:%d", ip or "<this-machine>", port)
     if ip and ip.startswith("172."):
         log.info("  (that is the container's address - use this machine's own, with :%d)", port)
+
+    if addon:
+        log.info("running as a Home Assistant add-on: the panel is reachable only through "
+                 "Home Assistant, which has already signed you in, so no setup token is used")
+    else:
+        # Deliberately in the log, despite the rule about keeping credentials
+        # out of it. That rule is about the camera password, which is a
+        # credential to somebody else's device. This one only guards this page,
+        # and reading this log already requires more access than the page
+        # grants - anyone who can run `docker logs` can read /data/setup_token
+        # directly. Printing it is what turns a lockout into a copy and paste.
+        log.info("setup token: %s", config_store.setup_token(Path(data_dir)))
+        log.info("  (only needed to unlock setup in a different browser, as ?t=<token>)")
     return httpd

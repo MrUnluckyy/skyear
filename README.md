@@ -71,6 +71,13 @@ on a Synology, a Raspberry Pi 4 or 5, and an Intel box.
 Your camera's address and password are written only to that machine. There is no
 field anywhere on the website that asks for them.
 
+Once a camera is saved, changing it is limited to the browser that saved it, so
+an open port on your network is not an open agent. The agent prints a setup
+token at startup (`docker logs skyear`) to unlock another browser, as
+`?t=<token>`. The Home Assistant add-on publishes no port and needs no token:
+the panel is reachable only through Home Assistant, which has already signed
+you in.
+
 ### Config files
 
 There is a `config.yaml`, and you do not need it. The setup page writes
@@ -117,7 +124,7 @@ details stripped.
 cd agent
 python3 -m venv .venv
 .venv/bin/python -m pip install -r requirements-dev.txt
-.venv/bin/python -m pytest          # 182 tests
+.venv/bin/python -m pytest          # 187 tests
 
 .venv/bin/python -m skyear.main --config config.yaml --data ./out --replay rec.wav
 ```
