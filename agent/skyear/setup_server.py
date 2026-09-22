@@ -284,6 +284,11 @@ class SetupHandler(BaseHTTPRequestHandler):
             cams = stored.get("cameras", [])
             return self._json({
                 "version": __version__,
+                # So the page can name the restart in the words of whatever is
+                # running it. "Restart the agent" means nothing on Home
+                # Assistant, where the thing has a Restart button and is called
+                # an add-on.
+                "platform": "homeassistant" if self.addon else "standalone",
                 "configured": bool(cams),
                 "paired": (self.data_dir / "device.json").is_file(),
                 "cameras": [{k: v for k, v in c.items() if k != "password"} for c in cams],

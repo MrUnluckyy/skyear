@@ -131,10 +131,17 @@
 
   <fieldset>
     <legend>3 · Connect to SkyEar</legend>
-    <p class="hint" style="margin:0 0 12px">Sign in at
-      <code>skyear.lt</code>, press Generate pairing code, and paste it here.</p>
-    <label for="code">Pairing code</label>
-    <input id="code" placeholder="K4M7PQR2" style="text-transform:uppercase">
+    <!-- Offered only while there is something to pair. An agent that is
+         already connected refuses a second code, so asking for one produced a
+         camera that saved correctly and an error underneath it. -->
+    <div id="pairBox">
+      <p class="hint" style="margin:0 0 12px">Sign in at
+        <code>skyear.lt</code>, press Generate pairing code, and paste it here.</p>
+      <label for="code">Pairing code</label>
+      <input id="code" placeholder="K4M7PQR2" style="text-transform:uppercase">
+    </div>
+    <p class="hint" id="pairedNote" hidden style="margin:0">Already connected to SkyEar.
+      A second camera needs no code — it registers itself.</p>
     <p style="margin:18px 0 0">
       <button class="primary" id="save">Save and connect</button>
     </p>
@@ -235,6 +242,24 @@ $("type").onchange = () => {
 let cameras = [];
 let editing = null;         // camera id, or null for a new one
 let alreadyPaired = false;  // a second camera needs no pairing code
+let platform = "standalone";
+
+/*
+ * How to restart, said the way the reader's own system says it.
+ *
+ * "Restart the agent" is our word for it. Home Assistant has no agent: it has
+ * an add-on, with a Restart button in a specific place. Someone following the
+ * instruction had to work out that those were the same thing.
+ */
+function saveLabel() {
+  return alreadyPaired ? "Save camera" : "Save and connect";
+}
+
+function restartHow() {
+  return platform === "homeassistant"
+    ? "Restart the add-on (Settings \u2192 Add-ons \u2192 SkyEar \u2192 Restart)"
+    : "Restart the agent (docker restart skyear)";
+}
 
 function nextCameraId() {
   for (let n = 1; n < 100; n++) {
@@ -317,27 +342,36 @@ $("save").onclick = async () => {
     });
     if (s.error) throw new Error(s.error);
 
-    const code = $("code").value.trim().toUpperCase();
+    /*
+     * The restart is mentioned every time, because it is needed every time.
+     *
+     * It used to be attached to two of the four pairing outcomes, which had
+     * nothing to do with whether a restart was due - it always is. The agent
+     * builds one worker per camera at startup and nothing watches the config
+     * afterwards, so a camera saved here is not being listened to yet.
+     */
+    const code = alreadyPaired ? "" : $("code").value.trim().toUpperCase();
+    const restart = `${restartHow()} so it starts listening to this camera.`;
+
     if (code) {
       const p = await api("api/pair", {
         method: "POST", headers: { "content-type": "application/json" },
         body: JSON.stringify({ code }),
       });
       if (p.error) {
-        msg($("saveMsg"), `Camera saved, but pairing failed: ${p.error}`, false);
+        msg($("saveMsg"), `Camera saved, but connecting failed: ${p.error}. ${restart}`, false);
       } else {
         msg($("saveMsg"),
-          "Connected. Restart the agent and your sensor appears on the map within a minute.", true);
+          `Connected. ${restart} Your sensor appears on the map within a minute.`, true);
       }
     } else if (alreadyPaired) {
-      // Already connected, so no code is needed. The agent declares its camera
-      // set on every upload and the server creates whatever it does not have,
-      // so a second camera needs a restart and nothing else.
+      // The agent declares its camera set on every upload and the server
+      // creates whatever it does not have, so this needs a restart and
+      // nothing else.
       msg($("saveMsg"),
-        "Saved. Restart the agent so it starts listening to this camera — it registers itself " +
-        "and appears on the map within a minute.", true);
+        `Saved. ${restart} It registers itself and appears on the map within a minute.`, true);
     } else {
-      msg($("saveMsg"), "Camera saved. Add a pairing code to connect it to SkyEar.", true);
+      msg($("saveMsg"), `Camera saved. ${restart} Add a pairing code to put it on the map.`, true);
     }
 
     /*
@@ -357,7 +391,7 @@ $("save").onclick = async () => {
 
     load();
   } catch (e) { msg($("saveMsg"), e.message || "Could not save.", false); }
-  btn.disabled = false; btn.textContent = "Save and connect";
+  btn.disabled = false; btn.textContent = saveLabel();
 };
 
 function showCamera(cam) {
@@ -427,7 +461,7 @@ $("removeCam").onclick = async () => {
   btn.disabled = false;
   if (r.error) return msg($("testMsg"), r.error, false);
   msg($("saveMsg"),
-      `${r.removed} removed. Restart the agent to stop listening to it. ` +
+      `${r.removed} removed. ${restartHow()} to stop listening to it. ` +
       `It stays on the map until you remove it there too.`, true);
   await load();
 };
@@ -438,6 +472,10 @@ async function load() {
     if (s.error) return;
     cameras = s.cameras || [];
     alreadyPaired = !!s.paired;
+    platform = s.platform || "standalone";
+    $("pairBox").hidden = alreadyPaired;
+    $("pairedNote").hidden = !alreadyPaired;
+    $("save").textContent = saveLabel();
     $("steps").innerHTML = [
       cameras.length
         ? `<b>${cameras.length} camera${cameras.length > 1 ? "s" : ""}</b>`

@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import {
   AttributionControl,
   Map as MapLibreMap,
@@ -111,6 +112,18 @@ export default function SkyMap() {
   const container = useRef<HTMLDivElement>(null);
   const map = useRef<MapLibreMap | null>(null);
   const [ready, setReady] = useState(false);
+  /*
+   * The element the beacons are mounted into: MapLibre's canvas container,
+   * not a sibling div.
+   *
+   * As a sibling, a wheel or touch event landing on a beacon bubbled up the
+   * overlay and out to the page - it never crossed the element MapLibre
+   * listens on, so scrolling over a sensor silently did nothing and pinch
+   * died with it. Inside the canvas container the events reach the map the
+   * same way they do for MapLibre's own markers.
+   */
+  const [overlayHost, setOverlayHost] = useState<HTMLElement | null>(null);
+  const overlay = useRef<HTMLDivElement | null>(null);
   const [theme, setTheme] = useState<Theme>("dark");
 
   const [aircraft, setAircraft] = useState<Aircraft[]>([]);
@@ -242,6 +255,7 @@ export default function SkyMap() {
     m.on("style.load", () => {
       addLayers(m, themeRef.current);
       map.current = m;
+      setOverlayHost(m.getCanvasContainer());
       setReady(true);
     });
 
@@ -249,6 +263,7 @@ export default function SkyMap() {
       ro.disconnect();
       m.remove();
       map.current = null;
+      setOverlayHost(null);
       setReady(false);
     };
   }, [addLayers]);
@@ -288,10 +303,35 @@ export default function SkyMap() {
     });
   }, [ready]);
 
+  /*
+   * How much of the arriving-wavefront halo to draw, 0 to 1.
+   *
+   * The rings are a fixed 92px across, which is a constant number of pixels
+   * and therefore a growing number of kilometres as you zoom out. At the
+   * opening zoom of 6, around latitude 55, a pixel is roughly 1.4 km - so the
+   * halo claimed a listening radius near 46 km. The measured range is a few
+   * kilometres. Decoration was making a coverage claim, in the flattering
+   * direction, on a map whose whole argument is that it does not flatter.
+   *
+   * 46px is honest at zoom 10 and closer (about 4 km and falling). Below that
+   * it fades out, leaving the dot, which is a position rather than an area.
+   * Written to a CSS variable rather than React state because this runs on
+   * every frame of a pinch.
+   */
+  const paintHalo = useCallback(() => {
+    const m = map.current;
+    if (!m || !overlay.current) return;
+    const scale = Math.max(0, Math.min(1, (m.getZoom() - 7) / 3));
+    overlay.current.style.setProperty("--beacon-halo", String(scale));
+  }, []);
+
   useEffect(() => {
     const m = map.current;
     if (!m || !ready) return;
-    const update = () => reproject(sensors);
+    const update = () => {
+      reproject(sensors);
+      paintHalo();
+    };
     update();
     m.on("move", update);
     m.on("zoom", update);
@@ -301,7 +341,7 @@ export default function SkyMap() {
       m.off("zoom", update);
       m.off("resize", update);
     };
-  }, [ready, sensors, reproject]);
+  }, [ready, sensors, reproject, paintHalo]);
 
   // --- live ADS-B through our proxy ---------------------------------------
   useEffect(() => {
@@ -522,9 +562,19 @@ export default function SkyMap() {
         <div ref={container} className="h-full w-full" />
       </div>
 
-      {/* Sensors, drawn in the DOM so the arrival animation can be CSS. */}
-      <div className="pointer-events-none absolute inset-0 overflow-hidden">
-        {clusters.map((cluster) => {
+      {/*
+        Sensors, drawn in the DOM so the arrival animation can be CSS, and
+        portalled into the map's own canvas container so they do not swallow
+        the gestures meant for the map.
+      */}
+      {overlayHost &&
+        createPortal(
+          <div
+            ref={overlay}
+            className="pointer-events-none absolute inset-0 overflow-hidden"
+            style={{ ["--beacon-halo" as string]: 1 }}
+          >
+            {clusters.map((cluster) => {
           // The group shows its liveliest member: one sensor hearing something
           // matters more than three sitting quiet.
           const lead = cluster.members.reduce((best, s) =>
@@ -548,7 +598,7 @@ export default function SkyMap() {
                     cluster.members.some((m) => m.id === selected) ? null : lead.id
                   )
                 }
-                className="pointer-events-auto absolute -left-7 -top-7 h-14 w-14 cursor-pointer rounded-full"
+                className="pointer-events-auto absolute -left-[18px] -top-[18px] h-9 w-9 cursor-pointer rounded-full"
                 aria-label={
                   many
                     ? `Show the ${cluster.members.length} sensors here`
@@ -571,8 +621,10 @@ export default function SkyMap() {
               />
             </div>
           );
-        })}
-      </div>
+            })}
+          </div>,
+          overlayHost
+        )}
 
       {/* Instrument rail. Flush to the edge rather than a floating card. */}
       <aside className="absolute inset-x-0 top-0 z-10 flex max-h-[80dvh] flex-col border-b border-edge bg-night/92 backdrop-blur-xl md:inset-x-auto md:inset-y-0 md:left-0 md:max-h-none md:w-[304px] md:border-b-0 md:border-r">

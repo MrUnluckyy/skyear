@@ -419,6 +419,56 @@ def test_a_single_camera_install_can_still_grow_into_two():
         "the bar must be visible as soon as one camera exists"
 
 
+def test_state_says_which_platform_it_is_on(agent, monkeypatch):
+    """The page names the restart in the reader's own words, so it has to know
+    whose words those are. "Restart the agent" means nothing on Home
+    Assistant, where the thing is an add-on with a Restart button."""
+    _, _, base = agent
+    _, state = get(base, "/api/state")
+    assert state["platform"] == "standalone"
+
+
+def test_state_reports_the_addon_platform(tmp_path, monkeypatch):
+    monkeypatch.setenv("SUPERVISOR_TOKEN", "supervisor-gave-us-this")
+    httpd = serve(tmp_path, {}, port=0, host="127.0.0.1")
+    base = f"http://127.0.0.1:{httpd.server_address[1]}"
+    try:
+        _, state = get(base, "/api/state")
+        assert state["platform"] == "homeassistant"
+    finally:
+        httpd.shutdown()
+
+
+def test_the_page_always_mentions_a_restart_after_saving():
+    """A camera saved here is not being listened to yet: main.py builds one
+    worker per camera at startup and nothing watches the config afterwards.
+
+    The instruction used to hang off two of the four pairing outcomes, so the
+    combination "already paired" plus "code typed" saved a camera, failed to
+    pair, and said nothing about what to do next.
+    """
+    from pathlib import Path
+    import skyear
+
+    page = (Path(skyear.__file__).parent / "setup.html").read_text()
+    body = page[page.index('$("save").onclick') : page.index("function showCamera")]
+    # Every branch that reports a save has to carry the restart.
+    branches = body.count('msg($("saveMsg")')
+    assert branches >= 3
+    assert body.count("${restart}") >= 3, "each outcome must say how to restart"
+
+
+def test_an_already_paired_agent_is_not_offered_a_pairing_field():
+    """Pairing refuses a second code, so offering the field produced a saved
+    camera with an error underneath it."""
+    from pathlib import Path
+    import skyear
+
+    page = (Path(skyear.__file__).parent / "setup.html").read_text()
+    assert '$("pairBox").hidden = alreadyPaired;' in page
+    assert 'const code = alreadyPaired ? "" : $("code")' in page, \
+        "and it must not try to pair even if a code is somehow present"
+
 # --- clip playback on the labelling page --------------------------------
 
 CLIP = bytes(range(256)) * 4   # 1024 distinguishable bytes

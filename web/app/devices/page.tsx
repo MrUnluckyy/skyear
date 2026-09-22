@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { createClient } from "@/lib/supabase";
 import SiteNav from "@/components/SiteNav";
 
@@ -155,7 +155,9 @@ function SensorName({
 }
 
 export default function Devices() {
-  const supabase = createClient();
+  // Memoised so `load` keeps one identity. Without it every render produced a
+  // new client, a new callback, and a torn-down and rebuilt poll interval.
+  const supabase = useMemo(() => createClient(), []);
   const [email, setEmail] = useState<string | null>(null);
   const [devices, setDevices] = useState<Device[]>([]);
   const [sensors, setSensors] = useState<Sensor[]>([]);
@@ -183,6 +185,31 @@ export default function Devices() {
 
   useEffect(() => {
     load();
+  }, [load]);
+
+  /*
+   * Keep the page live while it is being watched.
+   *
+   * This used to fetch once on mount and never again, which is exactly wrong
+   * for the moment it is used in: the setup flow ends with "restart the agent
+   * and it appears here", so people sit on this page waiting for a sensor to
+   * show up that the page had already decided did not exist. It also prints
+   * "last seen", a value that was going stale as they read it.
+   *
+   * Ten seconds matches the agent's upload interval, which is also its
+   * liveness heartbeat, so nothing is gained by asking faster. Only while the
+   * tab is visible - a forgotten tab should not poll all night.
+   */
+  useEffect(() => {
+    const tick = () => {
+      if (document.visibilityState === "visible") load();
+    };
+    const id = setInterval(tick, 10_000);
+    document.addEventListener("visibilitychange", tick);
+    return () => {
+      clearInterval(id);
+      document.removeEventListener("visibilitychange", tick);
+    };
   }, [load]);
 
   const live = codes.filter((c) => !c.used_at && new Date(c.expires_at).getTime() > now);

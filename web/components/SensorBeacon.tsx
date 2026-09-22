@@ -63,7 +63,13 @@ export function SensorBeacon({
             key={i}
             className={`ring-arrive ${ring} absolute rounded-full border`}
             style={{
-              inset: -46,
+              // Scaled by the map, not fixed. A constant pixel halo is a
+              // growing number of kilometres as you zoom out, and a ring on a
+              // map reads as range however it was meant - see paintHalo in
+              // SkyMap. At country zoom this reaches 0 and only the dot is
+              // left, which claims a position and nothing more.
+              inset: "calc(-46px * var(--beacon-halo, 1))",
+              opacity: "var(--beacon-halo, 1)",
               borderColor: colour,
               animationDelay: `${i * stagger}s`,
             }}
@@ -99,7 +105,11 @@ export function SensorBeacon({
       {standing && (
         <span
           className="unaccounted-ring absolute rounded-full border border-dashed"
-          style={{ inset: -20, borderColor: "var(--sodium)" }}
+          style={{
+            inset: "calc(-20px * var(--beacon-halo, 1))",
+            opacity: "var(--beacon-halo, 1)",
+            borderColor: "var(--sodium)",
+          }}
         />
       )}
 
