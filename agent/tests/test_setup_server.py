@@ -537,3 +537,55 @@ def test_a_range_past_the_end_is_refused(clip_agent):
 def test_a_range_that_cannot_be_parsed_is_ignored(clip_agent, rng):
     status, _, body = fetch_clip(clip_agent, rng)
     assert status == 200 and body == CLIP
+
+
+def save(base, camera, secret, cookie=None):
+    """Save a camera, carrying the cookie the first save hands back - the page
+    locks to the browser that configured it."""
+    import urllib.request
+    headers = {"content-type": "application/json"}
+    if cookie:
+        headers["cookie"] = cookie
+    req = urllib.request.Request(
+        base + "/api/save", method="POST", headers=headers,
+        data=json.dumps({"camera": camera, "secret": secret}).encode())
+    with urllib.request.urlopen(req, timeout=30) as r:
+        set_cookie = r.headers.get("set-cookie")
+    return set_cookie.split(";")[0] if set_cookie else cookie
+
+
+def test_saving_keeps_fields_the_form_does_not_show(agent):
+    """skyear-hassio#1: a Hikvision NVR needs `channel`, the page has no field
+    for it, and Save used to reset it to the default on every edit.
+
+    The reporter set channel 4 by hand in config.json, confirmed the right
+    stream after a restart, then lost it the moment they touched the page.
+    """
+    data, _, base = agent
+    nvr = {**CAMERA, "type": "hikvision", "host": "192.168.1.4",
+           "channel": 4, "stream": "sub"}
+    cookie = save(base, nvr, "hunter2")
+
+    # the page reposts what it can render - no channel, no stream
+    from_form = {k: v for k, v in nvr.items() if k not in ("channel", "stream")}
+    save(base, from_form, "", cookie)
+
+    saved = config_store.load(data)["cameras"][0]
+    assert saved["channel"] == 4, "Save erased a field it cannot display"
+    assert saved["stream"] == "sub"
+
+    from skyear.audio import build_url
+    assert build_url(saved, "hunter2").endswith("/Streaming/Channels/402")
+
+
+def test_changing_the_brand_does_not_keep_the_old_brand_s_fields(agent):
+    """The other half: a leftover `path` would override the URL the new type
+    builds, so a type change rebuilds the camera rather than merging onto it."""
+    data, _, base = agent
+    cookie = save(base, {**CAMERA, "type": "generic", "path": "/live/ch0"}, "x")
+    save(base, {**CAMERA, "type": "reolink"}, "", cookie)
+
+    saved = config_store.load(data)["cameras"][0]
+    assert "path" not in saved
+    from skyear.audio import build_url
+    assert build_url(saved, "x").endswith("/Preview_01_sub")

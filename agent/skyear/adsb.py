@@ -157,6 +157,17 @@ class AdsbTracker:
         apart from "we stopped being able to see anything"."""
         return (now or time.time()) - (self.last_ok or self.started_at)
 
+    def blind_during(self, t0: float, t1: float, now: float | None = None) -> float:
+        """Seconds of the window [t0, t1] that had no successful poll behind them.
+
+        Only the current outage is known - no outage history is kept - so this is
+        the overlap of [last_ok, now] with the window. That is the case that
+        matters: an event is judged moments after it ends, so if the feed was
+        down while the sound happened it is almost certainly still down now.
+        """
+        now = time.time() if now is None else now
+        return max(0.0, min(t1, now) - max(t0, self.last_ok or self.started_at))
+
     def rotate(self) -> bool:
         """Switch to the next provider that has not failed since the last
         success, returning True if there was one.

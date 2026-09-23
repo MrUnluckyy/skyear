@@ -199,6 +199,11 @@ Deno.serve(async (req) => {
       match_bearing: best ? num(best.bearing_deg) : null,
       match_delay_s: best ? num(best.delay_s) : null,
       has_clip: Boolean(e.clip),
+      // How much of this event's matching window had no ADS-B behind it. An
+      // unmatched event with a gap is not evidence of an unexplained sound, it
+      // is evidence that we were not looking. Null from an agent with no ADS-B
+      // configured, which is not the same as full coverage.
+      adsb_gap_s: num(e.adsb_gap_s),
     });
   }
 

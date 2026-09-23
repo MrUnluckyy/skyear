@@ -269,3 +269,71 @@ edit.** The default poll is now 10 s.
 **Still the real answer: local `readsb` + RTL-SDR.** No rate limit, ~1 Hz
 instead of 10 s, and own provenance. A local receiver deliberately does *not*
 fall back to a public API.
+
+### 2026-09-23 — the product is the unmatched sounds, and that changes what counts as a bug
+Appended by Claude Code, after the framing was corrected.
+
+**Aircraft detection is the validation, not the goal.** A sound from the air
+that ADS-B *can* explain is a labelled negative. A sound from the air that it
+*cannot* is the beginning of a drone suspicion — not proof, but the start. Every
+data-quality question below inherits its priority from that inversion.
+
+**So the 304 unmatched events in the 2026-09-18 entry are not an anomaly to
+explain away — they are the closest thing to a product this project has.** That
+entry established they sit on the aircraft tilt distribution rather than the
+wind one, which is exactly the population that matters: sounds from the air, not
+from the ground, with no transponder behind them.
+
+**The bug that follows, and it is the serious one.** `main.py` sets
+`ev["aircraft"] = cands` and records nothing about whether ADS-B was reachable
+at the time. An unmatched event during a 429 blind window is indistinguishable
+from an unmatched event under full coverage. **Under this framing an ADS-B
+outage does not degrade the dataset, it manufactures drone suspicions.** Today's
+rotation fix stamps *passes* with `adsb_gap_s` but leaves *events* unstamped,
+and events are the signal. Events need the same stamp and the cloud needs to
+treat an unmatched event with a gap as unusable rather than as evidence.
+
+**Before "unmatched" can mean anything, the benign explanations have to be
+subtractable.** Aircraft without ADS-B (Mode-S only, military, gliders, low GA,
+helicopters), ground sources, and feed outages all land in the same bucket. The
+suspicious class is what remains, so each event needs enough provenance attached
+to remove the rest.
+
+**Direction is the next real capability, and it routes around a known blocker.**
+Level comparison across cameras facing different ways gives a coarse bearing
+with no new timing precision. Crossed bearings from two sites localise a source.
+That is not the arrival-time multilateration the TODO blocks on timestamps -
+bearing triangulation needs events matched across sites within seconds, which
+`time.time()` already supports.
+
+**Per-site echo bias is systematic, so a bigger network does not average it
+out** - but ADS-B calibrates it out for free, per site, from thousands of
+labelled passes with a known true bearing. Site-to-site errors *are*
+independent, so network scale helps exactly where intuition says it does. The
+calibration is what makes each bearing worth crossing.
+
+#### Must be fixed, in priority order
+- [x] **Stamp events with ADS-B health.** Done: `blind_during` measures the
+      event window including the emission-time lookback, `detections.adsb_gap_s`
+      stores it (migration 0014) and `public_detections` publishes it.
+- [x] **Save erases fields the form does not render.** Done: a save merges
+      onto the stored camera, except on a type change, which rebuilds it so no
+      stale `path` or `url_env` can override the new type's URL.
+- [ ] **Setup GUI has no channel / stream field.** `build_url` already supports
+      both; only the form is missing them, so a Hikvision NVR is stuck on
+      channel 1. skyear-hassio#1.
+- [ ] **The host field accepts a whole RTSP path and concatenates it**, yielding
+      `…/Channels/402:554/Streaming/Channels/102`. Reject with a message.
+- [ ] **No un-pair or re-pair path.** `/api/pair` refuses once `device.json`
+      exists and no route resets it; on Home Assistant, deleting that file needs
+      a second add-on. An agent cannot be moved to another account.
+- [ ] **Per-camera bearing and site grouping** (skyear-hassio#2), with the
+      per-site ADS-B calibration that makes it mean something.
+- [ ] **Deploy what is already written:** tag `agent-v0.3.4`, bump the add-on's
+      pinned version, and `supabase functions deploy ingest` — the pass
+      exclusion does nothing until that function ships.
+
+**Grouping has a counting consequence.** One aircraft past a three-camera house
+writes three pass records today, one per sensor. That is three independent
+observations under the current model and triple counting under a grouped one.
+Whichever is chosen, the stats views have to agree with it.

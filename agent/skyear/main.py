@@ -20,6 +20,7 @@ import yaml
 from .adsb import AdsbTracker
 from .audio import AudioSource, build_url
 from .detector import BandEnergyDetector
+from .geo import SPEED_OF_SOUND
 from .matcher import PassTracker, match_event
 from . import DEFAULT_CLOUD_URL, config_store
 from .setup_server import serve as serve_setup
@@ -100,6 +101,9 @@ def camera_worker(cam, cfg, adsb, out_dir, events_w, passes_w, stop, live=True):
     ring = RingAudio(sr, det.max_frames * det.frame_s + pre + 20)
     match_cfg = cfg.get("matching", {})
     max_range = match_cfg.get("max_range_m", 12000)
+    # Emission-time matching looks back by the sound's travel time, so coverage
+    # has to have been good that far before the event to have had a chance.
+    match_lookback_s = max_range / SPEED_OF_SOUND
 
     pt = None
     if adsb and live:
@@ -138,6 +142,17 @@ def camera_worker(cam, cfg, adsb, out_dir, events_w, passes_w, stop, live=True):
                                  track_ground=match_cfg.get("track_ground", False))
                      if (adsb and live) else [])
             ev["aircraft"] = cands
+            # Whether "no aircraft match" means anything at all depends on
+            # whether we could see aircraft when the sound happened. match_event
+            # drops every candidate whose fix is older than max_fix_age_s, so an
+            # ADS-B outage turns every event into an unmatched one - and an
+            # unmatched sound from the air is precisely the shape of a drone
+            # suspicion. Without this, an outage does not degrade the data, it
+            # manufactures suspicions. None means no ADS-B is configured, which
+            # is a different thing from full coverage.
+            ev["adsb_gap_s"] = (round(adsb.blind_during(ev["start"] - match_lookback_s,
+                                                        ev["end"]), 1)
+                                if (adsb and live) else None)
             best = cands[0] if cands else None
             if clips_cfg.get("save", True):
                 audio = ring.slice(ev["start"] - pre, ev["end"] + 2)

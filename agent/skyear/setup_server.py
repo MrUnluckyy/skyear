@@ -369,8 +369,22 @@ class SetupHandler(BaseHTTPRequestHandler):
             else:
                 cam["password_env"] = env_name
             stored = config_store.load(self.data_dir)
-            others = [c for c in stored.get("cameras", []) if c["id"] != cam["id"]]
-            stored["cameras"] = others + [cam]
+            cams = stored.get("cameras", [])
+            existing = next((c for c in cams if c["id"] == cam["id"]), {})
+            others = [c for c in cams if c["id"] != cam["id"]]
+            # A form that cannot show a field must not be able to erase it. The
+            # page renders brand, address and credentials; a camera can also
+            # carry `channel` and `stream`, which an NVR needs and the page never
+            # asks for. Replacing the stored record wholesale meant that editing
+            # anything here silently reset an NVR camera to channel 1, undoing a
+            # hand-edit of config.json with no message. Same rule the password
+            # follows below: absent means keep, not erase.
+            #
+            # A type change is the exception. reolink, generic and ubiquiti do
+            # not share fields, and a `path` or `url_env` left over from the old
+            # type would override the URL the new one builds.
+            merged = cam if existing.get("type") != cam.get("type") else {**existing, **cam}
+            stored["cameras"] = others + [merged]
             secrets = stored.setdefault("secrets", {})
             # An empty field means "keep what is stored", not "erase it". The
             # password is never sent back to the browser, so editing any other

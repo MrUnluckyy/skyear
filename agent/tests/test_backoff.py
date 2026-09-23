@@ -222,3 +222,33 @@ def test_blind_for_counts_from_the_last_successful_poll():
     t = tracker()
     t.started_at, t.last_ok = 1000.0, 1100.0
     assert t.blind_for(now=1160.0) == 60.0
+
+
+# --- coverage behind a verdict ----------------------------------------------
+# An unmatched sound is what this project is actually looking for, and
+# match_event drops every candidate whose fix has gone stale - so while the feed
+# is down, every event comes out unmatched. These decide whether "no aircraft
+# match" is evidence or an artefact.
+
+def covered(t0, t1, last_ok, now, started_at=0.0):
+    t = tracker()
+    t.started_at, t.last_ok = started_at, last_ok
+    return t.blind_during(t0, t1, now=now)
+
+
+def test_a_healthy_feed_leaves_no_gap():
+    # the sound ended before the last successful poll, so it was fully covered
+    assert covered(900, 950, last_ok=1000, now=1000) == 0.0
+
+
+def test_an_outage_covering_the_whole_event_reports_the_whole_window():
+    assert covered(910, 950, last_ok=900, now=960) == 40.0
+
+
+def test_a_feed_that_died_mid_event_reports_only_the_blind_part():
+    assert covered(900, 950, last_ok=920, now=960) == 30.0
+
+
+def test_an_agent_that_has_never_polled_is_blind_from_startup():
+    """Otherwise the first events after a restart look perfectly covered."""
+    assert covered(900, 950, last_ok=0.0, now=960, started_at=800) == 50.0
