@@ -146,6 +146,22 @@
         <div class="hint">Roughly. First floor is about 4.</div>
       </div>
     </div>
+
+    <label for="facing">Which way it faces</label>
+    <select id="facing">
+      <option value="">Not set</option>
+      <option value="0">North</option>
+      <option value="45">North-east</option>
+      <option value="90">East</option>
+      <option value="135">South-east</option>
+      <option value="180">South</option>
+      <option value="225">South-west</option>
+      <option value="270">West</option>
+      <option value="315">North-west</option>
+    </select>
+    <div class="hint">Two cameras at one address pointing different ways can say
+      roughly where a sound came from — the one facing it hears it loudest. Rough
+      is enough. Leave it unset if you are not sure.</div>
   </fieldset>
 
   <fieldset>
@@ -306,6 +322,11 @@ function cameraFromForm() {
   const lat = parseFloat($("lat").value), lon = parseFloat($("lon").value);
   if (!isNaN(lat)) cam.lat = lat;
   if (!isNaN(lon)) cam.lon = lon;
+  // Always sent, null included: a saved camera is merged onto rather than
+  // replaced, so omitting this when the person clears it would make the old
+  // value permanent.
+  const f = $("facing").value;
+  cam.bearing_deg = f === "" ? null : parseFloat(f);
   const e = parseFloat($("elev").value), m = parseFloat($("mount").value);
   if (!isNaN(e)) cam.elevation_m = e;
   if (!isNaN(m)) cam.mount_height_m = m;
@@ -460,6 +481,17 @@ function showCamera(cam) {
   $("lon").value = cam && cam.lon != null ? cam.lon : "";
   $("elev").value = cam && cam.elevation_m != null ? cam.elevation_m : "";
   $("mount").value = cam && cam.mount_height_m != null ? cam.mount_height_m : 4;
+  // A bearing set by hand need not be one of the eight points. Offer it rather
+  // than showing blank and quietly discarding it on the next save.
+  const facing = $("facing");
+  Array.from(facing.querySelectorAll("option.custom")).forEach((o) => o.remove());
+  const bearing = cam && cam.bearing_deg != null ? String(cam.bearing_deg) : "";
+  if (bearing && !Array.from(facing.options).some((o) => o.value === bearing)) {
+    const o = new Option(bearing + "°", bearing);
+    o.className = "custom";
+    facing.add(o, 1);
+  }
+  facing.value = bearing;
   $("testMsg").textContent = "";
   // A stored camera's password is never sent back to the browser, so the field
   // is blank. Say what blank means here rather than letting it read as lost.

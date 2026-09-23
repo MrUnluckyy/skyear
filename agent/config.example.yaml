@@ -29,6 +29,14 @@ cameras:
     lon: 25.2797
     elevation_m: 120        # ground elevation above sea level
     mount_height_m: 4
+    # Which way the camera points, degrees clockwise from north (90 = east).
+    # Two or more cameras at one address, facing different ways, give a rough
+    # bearing to a sound: the one pointing at it hears it loudest. Omit it and
+    # the camera simply takes no part in that.
+    # bearing_deg: 90
+    # Cameras within 150 m of each other are treated as one site automatically.
+    # Set this only to override that - two buildings in one yard, say.
+    # site: home
 
 detector:
   band_hz: [50, 2000]

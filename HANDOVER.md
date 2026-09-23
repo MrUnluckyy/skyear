@@ -328,8 +328,9 @@ calibration is what makes each bearing worth crossing.
       upload offsets are kept deliberately, or re-pairing would replay this
       sensor's history into the next account. Revoking the token cloud-side
       stays an owner action on the devices page, and the response says so.
-- [ ] **Per-camera bearing and site grouping** (skyear-hassio#2), with the
-      per-site ADS-B calibration that makes it mean something.
+- [x] **Per-camera bearing and site grouping** (skyear-hassio#2). Done on the
+      agent: `direction.py`, `bearings.jsonl`, `tools/bearing_eval.py`. Not yet
+      uploaded anywhere - see below for why that is deliberate.
 - [ ] **Deploy what is already written:** tag `agent-v0.3.4`, bump the add-on's
       pinned version, and `supabase functions deploy ingest` — the pass
       exclusion does nothing until that function ships.
@@ -338,3 +339,63 @@ calibration is what makes each bearing worth crossing.
 writes three pass records today, one per sensor. That is three independent
 observations under the current model and triple counting under a grouped one.
 Whichever is chosen, the stats views have to agree with it.
+
+### 2026-09-23 — direction, and refusing to ship it before it is earned
+Appended by Claude Code.
+
+**Cameras at one address now produce a bearing.** `direction.py` groups cameras
+into sites by position (within 150 m, overridable with `site:`), joins the
+events several of them recorded of one sound, and estimates a bearing as a
+power-weighted circular mean of the bearings of the cameras that heard it,
+weighted by `snr_db`. SNR rather than level, because each camera has its own
+gain and possibly its own AGC, and SNR is measured against that camera's own
+floor, so a fixed gain difference cancels.
+
+It emits its own records to `bearings.jsonl` on a tick loop rather than
+annotating events, for the same reason `PassTracker` does: a camera writes its
+event the moment it has one, and the other recordings of that sound have not
+arrived yet. RTSP latency differs per camera by 0.5–2 s, so intervals are
+matched with 3 s of slack and a group settles for 8 s before closing.
+
+**What it cannot do is written into the module and onto every record.** The
+estimate cannot point outside the arc the cameras span — two cameras facing east
+and south cannot report north-west, they will report something between east and
+south, quietly — so `arc_deg` is on every record. The mapping from level
+difference to angle is uncalibrated, and per-site echo bias does not average out
+with more events or more sites.
+
+**What makes it worth building anyway: every record that ADS-B explained carries
+`true_bearing_deg` beside the estimate.** The calibration set accumulates per
+site, for free, with no work from the owner — the same trick the rest of the
+project runs on.
+
+**A single aimed camera still records, with `cameras: 1`.** "Only the
+west-facing camera heard it" is information.
+
+**Nothing is uploaded, deliberately.** `bearings.jsonl` stays on the device
+until `tools/bearing_eval.py` says the estimator beats its own baseline. The
+baseline is the point of that tool: an estimator confined to a 90° arc will post
+a small mean error near an airport where most traffic arrives along one
+approach, whether or not the microphones contribute anything. So it scores the
+estimate against a constant predictor that ignores the audio and always answers
+the middle of the arc, and refuses to emit a calibration below 200 crossed
+records spanning 3 of 4 quadrants — a bias fitted to aircraft that all came from
+one direction is fitted to the approach path, not to the site. This is `cpp_db`'s
+mistake with a baseline attached.
+
+Verified on synthetic input: an estimator that tracks the truth scores 67°
+better than the constant predictor; one that ignores the audio scores 0.4°
+better and is reported as not evidence of anything.
+
+**Why this and not multilateration.** Bearings crossed from two sites locate a
+source and need events matched across sites within seconds, which `time.time()`
+already supports. Arrival-time multilateration needs the sub-millisecond
+timestamps the TODO still blocks on. Direction is the localisation path that is
+actually open.
+
+**Context worth carrying:** Ukraine's Sky Fortress is this concept at national
+scale — ~14,000 acoustic sensors at $400–1,000 each, phones on poles, central
+trajectory calculation — and Lithuania is deploying it in 2026. That is
+validation of the thesis and a reason to be clear about the difference: this
+project needs no pole and no budget per site, because the camera is already
+there.

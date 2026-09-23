@@ -20,6 +20,7 @@ import yaml
 from .adsb import AdsbTracker
 from .audio import AudioSource, build_url
 from .detector import BandEnergyDetector
+from .direction import DirectionTracker, group_sites
 from .geo import SPEED_OF_SOUND
 from .matcher import PassTracker, match_event
 from . import DEFAULT_CLOUD_URL, config_store
@@ -83,7 +84,7 @@ def iso(t):
     return dt.datetime.fromtimestamp(t, dt.timezone.utc).isoformat(timespec="seconds")
 
 
-def camera_worker(cam, cfg, adsb, out_dir, events_w, passes_w, stop, live=True):
+def camera_worker(cam, cfg, adsb, out_dir, events_w, passes_w, stop, live=True, direction=None):
     cid = cam["id"]
     sensor = {"lat": cam["lat"], "lon": cam["lon"],
               "alt_m": cam.get("elevation_m", 0) + cam.get("mount_height_m", 0)}
@@ -169,6 +170,8 @@ def camera_worker(cam, cfg, adsb, out_dir, events_w, passes_w, stop, live=True):
             # or the detection rate this project is judged on becomes fiction.
             if pt and not ev.get("likely_wind"):
                 pt.add_event(ev, best["hex"] if best else None)
+            if direction:
+                direction.add_event(cid, ev, best)
             what = (f"{best.get('flight') or best['hex']} {best.get('type') or '?'} "
                     f"{best['slant_m']/1000:.1f} km, alt {best['alt_m']} m") if best else "no aircraft match"
             log.info("[%s] %s %.0fs SNR %.1f dB ~%.0f Hz tilt %.0f dB -> %s",
@@ -214,6 +217,29 @@ def _scrub(text: str, secret: str) -> str:
 def device_file(out_dir: Path) -> Path:
     """Where the device token lives. Inside the data dir, which is gitignored."""
     return out_dir / "device.json"
+
+
+def build_direction(cams, on_bearing):
+    """A DirectionTracker for the cameras that have been aimed, or None.
+
+    Cameras at one address hearing the same sound from different sides is the
+    only bearing this project can measure without timestamps it does not have.
+    It needs at least one camera with a `bearing_deg`, and two at one site before
+    anything can be crossed.
+    """
+    facing = {c["id"]: float(c["bearing_deg"])
+              for c in cams if c.get("bearing_deg") is not None}
+    if not facing:
+        return None
+    sites = group_sites(cams)
+    by_site = collections.Counter(sites[c] for c in facing)
+    log.info("direction from %d camera(s) across %d site(s): %s",
+             len(facing), len(by_site),
+             ", ".join(f"{s} {n}" for s, n in sorted(by_site.items())))
+    if max(by_site.values()) < 2:
+        log.info("only one aimed camera per site - bearings are recorded but "
+                 "cannot be crossed until a second camera there is aimed too")
+    return DirectionTracker(sites, facing, on_bearing=on_bearing)
 
 
 def make_uploader(cfg, out_dir: Path):
@@ -332,6 +358,7 @@ def main():
         os.environ.setdefault(name, value)
     events_w = JsonlWriter(out_dir / "events.jsonl")
     passes_w = JsonlWriter(out_dir / "passes.jsonl")
+    bearings_w = JsonlWriter(out_dir / "bearings.jsonl")
     stop = threading.Event()
     signal.signal(signal.SIGTERM, lambda *_: stop.set())
     signal.signal(signal.SIGINT, lambda *_: stop.set())
@@ -397,7 +424,20 @@ def main():
                 stop.wait(5)
     threading.Thread(target=cloud_loop, daemon=True, name="cloud").start()
 
-    threads = [threading.Thread(target=camera_worker, args=(c, cfg, adsb, out_dir, events_w, passes_w, stop),
+    direction = build_direction(cams, bearings_w.write)
+    if direction:
+        def direction_loop():
+            while not stop.is_set():
+                try:
+                    direction.tick()
+                except Exception:
+                    log.exception("direction tracker")
+                stop.wait(5)
+        threading.Thread(target=direction_loop, daemon=True, name="direction").start()
+
+    threads = [threading.Thread(target=camera_worker,
+                                args=(c, cfg, adsb, out_dir, events_w, passes_w, stop),
+                                kwargs={"direction": direction},
                                 daemon=True, name=f"cam-{c['id']}") for c in cams]
     for th in threads:
         th.start()
