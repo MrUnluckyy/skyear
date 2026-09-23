@@ -319,14 +319,15 @@ calibration is what makes each bearing worth crossing.
 - [x] **Save erases fields the form does not render.** Done: a save merges
       onto the stored camera, except on a type change, which rebuilds it so no
       stale `path` or `url_env` can override the new type's URL.
-- [ ] **Setup GUI has no channel / stream field.** `build_url` already supports
-      both; only the form is missing them, so a Hikvision NVR is stuck on
-      channel 1. skyear-hassio#1.
-- [ ] **The host field accepts a whole RTSP path and concatenates it**, yielding
-      `…/Channels/402:554/Streaming/Channels/102`. Reject with a message.
-- [ ] **No un-pair or re-pair path.** `/api/pair` refuses once `device.json`
-      exists and no route resets it; on Home Assistant, deleting that file needs
-      a second add-on. An agent cannot be moved to another account.
+- [x] **Setup GUI has no channel / stream field.** Done: both are on the form,
+      hidden for UniFi, which streams by token and has no channel.
+- [x] **The host field accepted a whole RTSP path and concatenated it.** Done:
+      refused on both Test and Save, with a message saying what to type.
+- [x] **No un-pair or re-pair path.** Done: `/api/unpair` forgets the token and
+      the running uploader stops when it goes, so no restart is needed. The
+      upload offsets are kept deliberately, or re-pairing would replay this
+      sensor's history into the next account. Revoking the token cloud-side
+      stays an owner action on the devices page, and the response says so.
 - [ ] **Per-camera bearing and site grouping** (skyear-hassio#2), with the
       per-site ADS-B calibration that makes it mean something.
 - [ ] **Deploy what is already written:** tag `agent-v0.3.4`, bump the add-on's

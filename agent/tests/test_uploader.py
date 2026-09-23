@@ -186,3 +186,47 @@ def test_bodyless_http_error_does_not_kill_the_uploader(tmp_path, monkeypatch):
     u.run(stop)                      # must return cleanly, not raise
     assert len(calls) >= 2, "a 500 should be retried, not fatal"
     assert u.events.offset == 0
+
+
+def test_upload_stops_when_the_agent_is_unpaired(tmp_path, monkeypatch):
+    """Disconnecting has to take effect in the running process.
+
+    The setup page deletes device.json; if the uploader does not notice, an
+    agent the owner has just disowned keeps shipping events to the old account
+    until somebody restarts it - which is most of the reason moving an agent
+    between accounts did not work.
+    """
+    (tmp_path / "device.json").write_text('{"token": "tok"}')
+    write_lines(tmp_path / "events.jsonl", [{"id": "e1"}])
+    u = Uploader("https://example.test", "tok", tmp_path, interval_s=0)
+
+    sent = []
+    monkeypatch.setattr(u, "send_once", lambda: sent.append(1))
+
+    class StopAfter:
+        def __init__(self, n):
+            self.n = n
+        def is_set(self):
+            return len(sent) >= self.n
+        def wait(self, d):
+            if len(sent) == 1:
+                (tmp_path / "device.json").unlink()   # the operator disconnects
+
+    u.run(StopAfter(5))
+    assert len(sent) == 1, "kept uploading after the token was withdrawn"
+
+
+def test_upload_runs_while_the_token_is_there(tmp_path, monkeypatch):
+    (tmp_path / "device.json").write_text('{"token": "tok"}')
+    u = Uploader("https://example.test", "tok", tmp_path, interval_s=0)
+    sent = []
+    monkeypatch.setattr(u, "send_once", lambda: sent.append(1))
+
+    class StopAfter:
+        def is_set(self):
+            return len(sent) >= 3
+        def wait(self, d):
+            pass
+
+    u.run(StopAfter())
+    assert len(sent) == 3

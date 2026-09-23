@@ -374,25 +374,28 @@ def main():
         LIVE.setdefault(c["id"], {"audio": False, "warm": False, "event_active": False,
                                   "rising": False, "at": time.time()})
 
-    uploader = make_uploader(cfg, out_dir)
-    if uploader:
-        threading.Thread(target=uploader.run, args=(stop,), daemon=True, name="upload").start()
-        log.info("cloud upload enabled")
-    else:
-        # Pairing happens in the setup page while this process is already
-        # running, so watch for the token rather than requiring a restart
-        # nobody knows to perform.
-        def await_pairing():
-            while not stop.is_set():
+    # Pairing and unpairing both happen in the setup page while this process is
+    # already running, so neither may require a restart nobody knows to perform.
+    # One loop covers both directions: wait for a token, upload until it goes
+    # away or is refused, then wait again.
+    def cloud_loop():
+        while not stop.is_set():
+            if not device_file(out_dir).is_file():
                 stop.wait(5)
-                if stop.is_set() or not device_file(out_dir).is_file():
-                    continue
-                late = make_uploader(cfg, out_dir)
-                if late:
-                    log.info("paired - starting upload")
-                    late.run(stop)
-                return
-        threading.Thread(target=await_pairing, daemon=True, name="await-pair").start()
+                continue
+            up = make_uploader(cfg, out_dir)
+            if not up:
+                stop.wait(5)
+                continue
+            log.info("cloud upload enabled")
+            up.run(stop)
+            # run() returns for two reasons. The token file was deleted, in
+            # which case the loop simply waits for a new pairing. Or the server
+            # refused the token, which retrying cannot fix - so wait for the
+            # operator to unpair rather than spinning on a rejection.
+            while not stop.is_set() and device_file(out_dir).is_file():
+                stop.wait(5)
+    threading.Thread(target=cloud_loop, daemon=True, name="cloud").start()
 
     threads = [threading.Thread(target=camera_worker, args=(c, cfg, adsb, out_dir, events_w, passes_w, stop),
                                 daemon=True, name=f"cam-{c['id']}") for c in cams]

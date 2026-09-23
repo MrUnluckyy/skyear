@@ -124,6 +124,14 @@ class Uploader:
         self.url = f"{base_url.rstrip('/')}/functions/v1/ingest"
         self.token = token
         self.state_path = data_dir / "upload_state.json"
+        # Unpairing deletes this file. Without watching it, an agent the owner
+        # has just disowned keeps uploading to the old account until someone
+        # restarts the process - which is most of the reason moving an agent
+        # between accounts did not work.
+        self.device_path = data_dir / "device.json"
+        # Only police a token file that was there to begin with, so an Uploader
+        # constructed with a token from anywhere else still runs.
+        self._watch_token = self.device_path.is_file()
         self.interval_s = interval_s
         self.max_backoff_s = max_backoff_s
         # Live per-camera state, so the map can show what is being heard now
@@ -200,6 +208,9 @@ class Uploader:
     def run(self, stop: threading.Event) -> None:
         fails = 0
         while not stop.is_set():
+            if self._watch_token and not self.device_path.is_file():
+                log.info("device token removed - this agent is no longer paired")
+                return
             try:
                 self.send_once()
                 fails = 0

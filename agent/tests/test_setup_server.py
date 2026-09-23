@@ -589,3 +589,114 @@ def test_changing_the_brand_does_not_keep_the_old_brand_s_fields(agent):
     assert "path" not in saved
     from skyear.audio import build_url
     assert build_url(saved, "x").endswith("/Preview_01_sub")
+
+
+def test_the_page_asks_for_channel_and_stream():
+    """skyear-hassio#1, the other half: an NVR camera is unreachable without
+    them, and the page had no field for either, so a Hikvision NVR was stuck on
+    channel 1 no matter how many cameras were behind it."""
+    from pathlib import Path
+    import skyear
+
+    page = (Path(skyear.__file__).parent / "setup.html").read_text()
+    assert 'id="channel"' in page and 'id="stream"' in page
+    assert "cam.channel" in page and "cam.stream" in page, "and must send them"
+    # UniFi streams by token and has no channel, so the box is hidden for it
+    assert '$("nvrBox").style.display = u ? "none" : ""' in page
+
+
+def test_a_whole_rtsp_url_in_the_address_box_is_refused(agent):
+    """It used to be concatenated: pasting 192.168.1.4:554/Streaming/Channels/402
+    produced a URL with that path AND the built one in it, which then failed for
+    a reason the person could not see."""
+    import urllib.error
+    _, _, base = agent
+    cam = {**CAMERA, "host": "192.168.1.4:554/Streaming/Channels/402"}
+    try:
+        post(base, "/api/save", {"camera": cam, "secret": "x"})
+        raise AssertionError("should have refused a pasted URL")
+    except urllib.error.HTTPError as e:
+        assert e.code == 400
+        assert "only the address" in json.load(e).get("error", "")
+
+
+def test_testing_a_pasted_url_says_so_before_ffprobe_runs(agent):
+    """The Test button is where people find out, so it must not spend 25
+    seconds probing a URL that cannot be right."""
+    _, _, base = agent
+    _, body = post(base, "/api/test", {
+        "camera": {**CAMERA, "host": "rtsp://192.168.1.4/Streaming/Channels/402"},
+        "secret": "x"})
+    assert body["ok"] is False and "only the address" in body["error"]
+
+
+def test_an_ordinary_address_still_passes():
+    from skyear.setup_server import host_error
+    assert host_error("192.168.1.50") is None
+    assert host_error("nvr.local") is None
+    assert host_error(" 192.168.1.4 ") is None
+    assert host_error("") == "a camera address is required"
+
+
+def pair_once(base, data, monkeypatch):
+    """Pair against a stubbed cloud and return the auth token for later calls."""
+    import skyear.setup_server as ss
+    monkeypatch.setattr(ss, "pair", lambda url, code, cameras, name="x": {
+        "device_id": "abc", "token": "t", "cameras": [c["id"] for c in cameras]})
+    post(base, "/api/save", {"camera": CAMERA, "secret": "hunter2"})
+    token = config_store.setup_token(data)
+    post(base, f"/api/pair?t={token}", {"code": "K4M7PQR2"})
+    return token
+
+
+def test_an_agent_can_be_disconnected_and_paired_again(agent, monkeypatch):
+    """Moving an agent to another account was impossible through the UI: pairing
+    refuses once device.json exists and nothing could remove it. On Home
+    Assistant that meant installing a file-editor add-on to delete a file the
+    person owns."""
+    data, _, base = agent
+    token = pair_once(base, data, monkeypatch)
+    assert (data / "device.json").is_file()
+
+    status, body = post(base, f"/api/unpair?t={token}", {})
+    assert status == 200 and body["ok"]
+    assert not (data / "device.json").is_file()
+    assert "retire it there" in body["note"], "must say the cloud side is separate"
+
+    _, state = get(base, f"/api/state?t={token}")
+    assert state["paired"] is False
+
+    # and the code path that used to refuse now works
+    status, body = post(base, f"/api/pair?t={token}", {"code": "K4M7PQR2"})
+    assert status == 200 and body.get("ok")
+
+
+def test_already_sent_measurements_are_not_replayed_into_the_next_account(agent, monkeypatch):
+    """The upload offsets must survive an unpair, or re-pairing would ship this
+    sensor's whole history to whoever pairs it next."""
+    data, _, base = agent
+    token = pair_once(base, data, monkeypatch)
+    (data / "upload_state.json").write_text(json.dumps(
+        {"events_offset": 4096, "passes_offset": 512}))
+
+    post(base, f"/api/unpair?t={token}", {})
+
+    assert json.loads((data / "upload_state.json").read_text())["events_offset"] == 4096
+
+
+def test_unpairing_an_unpaired_agent_says_so(agent):
+    import urllib.error
+    _, _, base = agent
+    try:
+        post(base, "/api/unpair", {})
+        raise AssertionError("should have refused")
+    except urllib.error.HTTPError as e:
+        assert e.code == 400
+
+
+def test_the_page_offers_the_disconnect(agent):
+    from pathlib import Path
+    import skyear
+
+    page = (Path(skyear.__file__).parent / "setup.html").read_text()
+    assert 'id="unpair"' in page and "api/unpair" in page

@@ -60,6 +60,29 @@ def running_as_addon() -> bool:
     return any(os.environ.get(name) for name in SUPERVISOR_ENV)
 
 
+# An address, not a URL. Hostname or IP only - no scheme, no path, no port.
+HOST_RE = re.compile(r"[A-Za-z0-9._-]+")
+
+
+def host_error(host: str) -> str | None:
+    """Why this address cannot be used, or None if it can.
+
+    The page asks for an address and the URL builder supplies the path, so
+    pasting a whole RTSP URL used to be concatenated rather than rejected:
+    `192.168.1.4:554/Streaming/Channels/402` became
+    `rtsp://...@192.168.1.4:554/Streaming/Channels/402:554/Streaming/Channels/102`,
+    a URL with two paths in it that still appeared to contain what was typed.
+    """
+    h = (host or "").strip()
+    if not h:
+        return "a camera address is required"
+    if HOST_RE.fullmatch(h):
+        return None
+    return ("Enter only the address, like 192.168.1.4. The make, channel and "
+            "stream boxes build the rest of the URL - a whole RTSP path pasted "
+            "here would be glued onto the one this builds.")
+
+
 def probe_camera(cam: dict, secret: str, timeout: int = 25) -> dict:
     """Ask ffprobe what the camera streams. Never echoes the credential back."""
     url = build_url(cam, secret)
@@ -353,6 +376,9 @@ class SetupHandler(BaseHTTPRequestHandler):
 
         if route == "/api/test":
             cam = body.get("camera") or {}
+            bad = host_error(cam.get("host", ""))
+            if bad:
+                return self._json({"ok": False, "error": bad})
             return self._json(probe_camera(cam, body.get("secret", "")))
 
         if route == "/api/save":
@@ -360,6 +386,9 @@ class SetupHandler(BaseHTTPRequestHandler):
             secret = body.get("secret", "")
             if not cam.get("id") or cam.get("lat") is None or cam.get("lon") is None:
                 return self._json({"error": "camera id and position are required"}, 400)
+            bad = host_error(cam.get("host", ""))
+            if bad:
+                return self._json({"error": bad}, 400)
             if not re.fullmatch(r"[a-z0-9][a-z0-9-]{0,31}", cam["id"]):
                 return self._json({"error": "camera id must be lowercase letters, "
                                             "digits and hyphens"}, 400)
@@ -458,6 +487,26 @@ class SetupHandler(BaseHTTPRequestHandler):
             p.write_text(json.dumps(res, indent=1))
             p.chmod(0o600)
             return self._json({"ok": True, "device_id": res.get("device_id")})
+
+        if route == "/api/unpair":
+            token_file = self.data_dir / "device.json"
+            if not token_file.is_file():
+                return self._json({"error": "this agent is not paired"}, 400)
+            token_file.unlink()
+            # upload_state.json is deliberately left alone. Its offsets mark
+            # what has already been sent, and resetting them would replay this
+            # sensor's history into whichever account is paired next.
+            #
+            # The cloud still holds the device row and its token. Only the owner
+            # can revoke that, from the devices page - an agent has no authority
+            # to delete an account's records and should not be given any.
+            log.info("unpaired: device token removed, upload will stop")
+            return self._json({
+                "ok": True,
+                "note": "This agent has forgotten its account and can be paired "
+                        "again. The old device is still listed on your devices "
+                        "page - retire it there to revoke its token.",
+            })
 
         return self._json({"error": "not found"}, 404)
 

@@ -78,6 +78,25 @@
     <input id="host" placeholder="192.168.1.50" autocomplete="off">
     <div class="hint" id="hostHint">Find it in your router's device list, or the camera's app.</div>
 
+    <div id="nvrBox">
+      <div class="row">
+        <div>
+          <label for="channel">Channel</label>
+          <input id="channel" type="number" min="1" max="64" value="1">
+          <div class="hint">1 on its own. On an NVR, its number — the
+            fourth camera is 4.</div>
+        </div>
+        <div>
+          <label for="stream">Stream</label>
+          <select id="stream">
+            <option value="sub">Sub — lower bandwidth</option>
+            <option value="main">Main — full quality</option>
+          </select>
+          <div class="hint">Sub is enough: the audio is identical.</div>
+        </div>
+      </div>
+    </div>
+
     <div id="creds">
       <div class="row">
         <div>
@@ -140,8 +159,14 @@
       <label for="code">Pairing code</label>
       <input id="code" placeholder="K4M7PQR2" style="text-transform:uppercase">
     </div>
-    <p class="hint" id="pairedNote" hidden style="margin:0">Already connected to SkyEar.
-      A second camera needs no code — it registers itself.</p>
+    <div id="pairedNote" hidden>
+      <p class="hint" style="margin:0">Already connected to SkyEar.
+        A second camera needs no code — it registers itself.</p>
+      <p style="margin:12px 0 0">
+        <button id="unpair" type="button" class="link">Disconnect from this account</button>
+      </p>
+      <div id="unpairMsg"></div>
+    </div>
     <p style="margin:18px 0 0">
       <button class="primary" id="save">Save and connect</button>
     </p>
@@ -227,6 +252,7 @@ function isUnifi() { return $("type").value === "ubiquiti"; }
 $("type").onchange = () => {
   const u = isUnifi();
   $("creds").style.display = u ? "none" : "";
+  $("nvrBox").style.display = u ? "none" : "";
   $("tokenBox").style.display = u ? "" : "none";
   $("hostLabel").textContent = u ? "Address of your UniFi NVR or UDM" : "Camera address on your network";
   $("hostHint").textContent = u
@@ -271,7 +297,12 @@ function nextCameraId() {
 
 function cameraFromForm() {
   const cam = { id: editing || nextCameraId(), type: $("type").value, host: $("host").value.trim() };
-  if (!isUnifi()) cam.username = $("user").value.trim() || "admin";
+  if (!isUnifi()) {
+    cam.username = $("user").value.trim() || "admin";
+    const ch = parseInt($("channel").value, 10);
+    cam.channel = isNaN(ch) || ch < 1 ? 1 : ch;
+    cam.stream = $("stream").value === "main" ? "main" : "sub";
+  }
   const lat = parseFloat($("lat").value), lon = parseFloat($("lon").value);
   if (!isNaN(lat)) cam.lat = lat;
   if (!isNaN(lon)) cam.lon = lon;
@@ -315,6 +346,28 @@ async function fillElevation() {
     }
   } catch { $("elevHint").textContent = "Could not look it up."; }
 }
+/*
+ * Disconnecting is how an agent moves to another account. Without it the only
+ * route was deleting /data/device.json by hand, which on Home Assistant means
+ * installing a file-editor add-on to reach a file the person owns.
+ */
+$("unpair").onclick = async () => {
+  if (!confirm("Disconnect this agent from your SkyEar account?\n\n"
+             + "It stops uploading and can be paired again with a new code. "
+             + "Measurements already sent stay with the old account.")) return;
+  const btn = $("unpair");
+  btn.disabled = true;
+  try {
+    const r = await api("api/unpair", {});
+    msg($("unpairMsg"), r.note || "Disconnected.", true);
+    await load();
+  } catch (e) {
+    msg($("unpairMsg"), String(e.message || e), false);
+  } finally {
+    btn.disabled = false;
+  }
+};
+
 $("lat").onchange = fillElevation;
 $("lon").onchange = fillElevation;
 
@@ -399,6 +452,8 @@ function showCamera(cam) {
   $("type").value = (cam && cam.type) || "reolink"; $("type").onchange();
   $("host").value = (cam && cam.host) || "";
   $("user").value = (cam && cam.username) || "admin";
+  $("channel").value = (cam && cam.channel) || 1;
+  $("stream").value = (cam && cam.stream) === "main" ? "main" : "sub";
   $("pass").value = "";
   $("token").value = "";
   $("lat").value = cam && cam.lat != null ? cam.lat : "";
