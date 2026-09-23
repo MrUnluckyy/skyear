@@ -315,7 +315,7 @@ calibration is what makes each bearing worth crossing.
 #### Must be fixed, in priority order
 - [x] **Stamp events with ADS-B health.** Done: `blind_during` measures the
       event window including the emission-time lookback, `detections.adsb_gap_s`
-      stores it (migration 0014) and `public_detections` publishes it.
+      stores it (migration 0016) and `public_detections` publishes it.
 - [x] **Save erases fields the form does not render.** Done: a save merges
       onto the stored camera, except on a type change, which rebuilds it so no
       stale `path` or `url_env` can override the new type's URL.
