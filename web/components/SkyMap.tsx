@@ -90,7 +90,53 @@ type MapPayload = {
   error?: string | null;
 };
 
-function aircraftFeatures(list: Aircraft[]) {
+/*
+ * Aircraft are the control group, not the subject.
+ *
+ * A flight tracker makes them the hero. Here they are the texture a sound is
+ * read against, so they are drawn quiet and oriented, and only light up when a
+ * sensor actually heard one. ADS-B gives the heading for nothing, and an
+ * oriented silhouette reads as traffic at a size where a dot still read as a
+ * marker asking to be clicked.
+ *
+ * Top view, nose up, in a 24x24 box: fuselage, swept wings, tailplane.
+ */
+const PLANE =
+  "M12 1.2 L13.1 4.6 L13.1 9.2 L22 14.4 L22 16.4 L13.1 13.8 L13.1 19.2 " +
+  "L15.6 21.3 L15.6 22.6 L12 21.6 L8.4 22.6 L8.4 21.3 L10.9 19.2 L10.9 13.8 " +
+  "L2 16.4 L2 14.4 L10.9 9.2 L10.9 4.6 Z";
+
+function planeImage(colour: string, ratio = 2) {
+  const canvas = document.createElement("canvas");
+  canvas.width = canvas.height = 24 * ratio;
+  const ctx = canvas.getContext("2d");
+  if (!ctx) return null;
+  ctx.scale(ratio, ratio);
+  ctx.fillStyle = colour;
+  ctx.fill(new Path2D(PLANE));
+  return ctx.getImageData(0, 0, canvas.width, canvas.height);
+}
+
+/*
+ * Rough size from the ICAO type code, and rough is the honest word: it is a
+ * prefix test over the types that actually fly here, not a fleet database. A
+ * wrong guess costs a few pixels, so the failure is invisible rather than
+ * misleading - which is the only reason a heuristic belongs on the map at all.
+ */
+const HEAVY = /^(A3[3458]|A38|B7[4678]|B75|IL7|AN1|C17|MD11)/;
+const LIGHT = /^(C1[0-9]|C2[0-9]|P28|PA[0-9]|DA[24]|SR2|TBM|BE[0-9]|AT[0-9]|DH8|L410|EV97|VL3)/;
+const ROTOR = /^(EC[0-9]|H1[0-9]|R22|R44|R66|S76|A13|B06|AS3|MI[0-9]|UH[0-9])/;
+
+function aircraftScale(type: string | null) {
+  if (!type) return 0.62;
+  const t = type.toUpperCase();
+  if (ROTOR.test(t)) return 0.5;
+  if (HEAVY.test(t)) return 0.9;
+  if (LIGHT.test(t)) return 0.5;
+  return 0.68; // the narrowbodies that make up most of the traffic here
+}
+
+function aircraftFeatures(list: Aircraft[], heard: Set<string>) {
   return {
     type: "FeatureCollection" as const,
     features: list.map((a) => ({
@@ -103,6 +149,11 @@ function aircraftFeatures(list: Aircraft[]) {
         label: a.flight ?? a.reg ?? a.hex,
         alt: a.alt_m,
         onGround: a.alt_m <= 0,
+        // Null track is common on the ground and on older transponders. Nose
+        // north beats refusing to draw the aircraft.
+        track: a.track ?? 0,
+        scale: aircraftScale(a.type),
+        heard: a.flight ? heard.has(a.flight.trim().toUpperCase()) : false,
       },
     })),
   };
@@ -168,8 +219,27 @@ export default function SkyMap() {
   const seen = useRef<Set<string>>(new Set());
   const first = useRef(true);
 
-  const latest = useRef({ aircraft });
-  latest.current = { aircraft };
+  /*
+   * Which aircraft a sensor has actually heard recently, by callsign.
+   *
+   * public_detections carries match_flight but not the ICAO address, so the
+   * callsign is the join. It is not unique for all time - the same flight
+   * number flies daily - but over this window it identifies the aircraft in
+   * the sky well enough to light one up.
+   */
+  const heardFlights = useMemo(() => {
+    const since = Date.now() - 15 * 60_000;
+    const out = new Set<string>();
+    for (const d of detections) {
+      if (d.match_flight && Date.parse(d.started_at) >= since) {
+        out.add(d.match_flight.trim().toUpperCase());
+      }
+    }
+    return out;
+  }, [detections]);
+
+  const latest = useRef({ aircraft, heardFlights });
+  latest.current = { aircraft, heardFlights };
   const themeRef = useRef<Theme>(theme);
   themeRef.current = theme;
 
@@ -177,20 +247,65 @@ export default function SkyMap() {
     const halo = forTheme === "dark" ? "#080d12" : "#ffffff";
     const text = forTheme === "dark" ? "#c9e2f0" : "#1f2933";
 
-    if (!m.getSource("aircraft")) {
-      m.addSource("aircraft", { type: "geojson", data: aircraftFeatures(latest.current.aircraft) });
+    // Traffic nobody heard sits close to the basemap. Frost is reserved for the
+    // aircraft a sensor actually picked up, which is the only one worth a look.
+    const quiet = forTheme === "dark" ? "#5b7183" : "#9aadba";
+    for (const [id, colour] of [["plane-quiet", quiet], ["plane-heard", FROST]] as const) {
+      if (!m.hasImage(id)) {
+        const img = planeImage(colour);
+        if (img) m.addImage(id, img, { pixelRatio: 2 });
+      }
     }
-    if (!m.getLayer("aircraft-dot")) {
+
+    if (!m.getSource("aircraft")) {
+      m.addSource("aircraft", {
+        type: "geojson",
+        data: aircraftFeatures(latest.current.aircraft, latest.current.heardFlights),
+      });
+    }
+    // Parked transponders on an apron are not traffic and should not read as a
+    // formation of aircraft sitting on the airport. They stay dots, dimmer.
+    if (!m.getLayer("aircraft-ground")) {
       m.addLayer({
-        id: "aircraft-dot",
+        id: "aircraft-ground",
         type: "circle",
         source: "aircraft",
+        filter: ["get", "onGround"],
         paint: {
-          "circle-radius": ["case", ["get", "onGround"], 2.5, 4.5],
-          "circle-color": ["case", ["get", "onGround"], GROUND, FROST],
-          "circle-stroke-width": ["case", ["get", "onGround"], 0, 1],
-          "circle-stroke-color": halo,
-          "circle-opacity": ["case", ["get", "onGround"], 0.5, 1],
+          "circle-radius": 2,
+          "circle-color": GROUND,
+          "circle-opacity": 0.35,
+        },
+      });
+    }
+    if (!m.getLayer("aircraft-plane")) {
+      m.addLayer({
+        id: "aircraft-plane",
+        type: "symbol",
+        source: "aircraft",
+        filter: ["!", ["get", "onGround"]],
+        layout: {
+          "icon-image": ["case", ["get", "heard"], "plane-heard", "plane-quiet"],
+          "icon-rotate": ["get", "track"],
+          "icon-rotation-alignment": "map",
+          // Small at country zoom where the whole fleet is on screen, bigger
+          // once you are looking at one sensor's sky. `zoom` has to sit at the
+          // top of the interpolate - it cannot be a factor inside a product -
+          // so the per-aircraft scaling goes in the stops instead.
+          "icon-size": [
+            "interpolate",
+            ["linear"],
+            ["zoom"],
+            5,
+            ["*", ["get", "scale"], ["case", ["get", "heard"], 1.2, 1], 0.62],
+            10,
+            ["*", ["get", "scale"], ["case", ["get", "heard"], 1.2, 1], 1],
+          ],
+          "icon-allow-overlap": true,
+          "icon-ignore-placement": true,
+        },
+        paint: {
+          "icon-opacity": ["case", ["get", "heard"], 1, 0.5],
         },
       });
     }
@@ -208,7 +323,24 @@ export default function SkyMap() {
           "text-anchor": "top",
           "text-letter-spacing": 0.04,
         },
-        paint: { "text-color": text, "text-halo-color": halo, "text-halo-width": 1.6 },
+        paint: {
+          "text-color": ["case", ["get", "heard"], text, quiet],
+          "text-halo-color": halo,
+          "text-halo-width": 1.6,
+          // Labelling every aircraft at every zoom was most of what made the
+          // sky louder than the ground. A callsign is only worth the ink once
+          // a sensor heard that aircraft, or once you have zoomed in far
+          // enough to be asking about one of them in particular.
+          "text-opacity": [
+            "interpolate",
+            ["linear"],
+            ["zoom"],
+            8.5,
+            ["case", ["get", "heard"], 1, 0],
+            10,
+            ["case", ["get", "heard"], 1, 0.75],
+          ],
+        },
       });
     }
   }, []);
@@ -441,9 +573,9 @@ export default function SkyMap() {
 
   useEffect(() => {
     (map.current?.getSource("aircraft") as GeoJSONSource | undefined)?.setData(
-      aircraftFeatures(aircraft)
+      aircraftFeatures(aircraft, heardFlights)
     );
-  }, [aircraft]);
+  }, [aircraft, heardFlights]);
 
   // --- derived ------------------------------------------------------------
   const total = useMemo(

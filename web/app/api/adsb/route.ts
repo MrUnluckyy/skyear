@@ -14,7 +14,24 @@ import type { Aircraft } from "@/lib/types";
  * each one straight upstream, which is exactly the ban this exists to prevent.
  */
 
-const UPSTREAM = "https://api.adsb.lol/v2/lat/{lat}/lon/{lon}/dist/{nm}";
+/*
+ * Two providers, on the identical readsb schema.
+ *
+ * Measured 2026-09-23 from one client at a 10 s poll, 48 requests each:
+ * adsb.lol returned 429 for 8 of them and adsb.fi for none. That is the
+ * provider shedding load, not us exceeding a rate - we are two orders of
+ * magnitude under its burst limit - so polling slower cannot fix it. With one
+ * provider a shed request on a cold cache blanks the map, and the backoff then
+ * keeps it blank for minutes. The agent rotates for the same reason.
+ *
+ * Sticky: stay on whichever answered last rather than leading with the one
+ * that just refused.
+ */
+const PROVIDERS = [
+  "https://opendata.adsb.fi/api/v2/lat/{lat}/lon/{lon}/dist/{nm}",
+  "https://api.adsb.lol/v2/lat/{lat}/lon/{lon}/dist/{nm}",
+];
+let provider = 0;
 const MIN_INTERVAL_MS = 10_000; // never hit upstream faster than this
 const FT_TO_M = 0.3048;
 
@@ -45,7 +62,9 @@ function backoffMs(n: number) {
 }
 
 function parse(json: unknown): Aircraft[] {
-  const planes = (json as { ac?: unknown[] })?.ac ?? [];
+  // adsb.lol calls the array `ac`, adsb.fi calls it `aircraft`. Same rows.
+  const j = json as { ac?: unknown[]; aircraft?: unknown[] };
+  const planes = j?.ac ?? j?.aircraft ?? [];
   const out: Aircraft[] = [];
   for (const raw of planes) {
     const a = raw as Record<string, unknown>;
@@ -68,15 +87,28 @@ function parse(json: unknown): Aircraft[] {
 }
 
 async function fetchRegion(r: (typeof REGIONS)[number]): Promise<Aircraft[]> {
-  const target = UPSTREAM.replace("{lat}", r.lat.toFixed(4))
-    .replace("{lon}", r.lon.toFixed(4))
-    .replace("{nm}", String(r.nm));
-  const res = await fetch(target, {
-    headers: { "User-Agent": "skyear-web/0.1" },
-    cache: "no-store",
-  });
-  if (!res.ok) throw new Error(`upstream ${res.status}`);
-  return parse(await res.json());
+  let last = "";
+  for (let attempt = 0; attempt < PROVIDERS.length; attempt += 1) {
+    const i = (provider + attempt) % PROVIDERS.length;
+    const target = PROVIDERS[i]
+      .replace("{lat}", r.lat.toFixed(4))
+      .replace("{lon}", r.lon.toFixed(4))
+      .replace("{nm}", String(r.nm));
+    try {
+      const res = await fetch(target, {
+        headers: { "User-Agent": "skyear-web/0.1" },
+        cache: "no-store",
+      });
+      if (!res.ok) throw new Error(`upstream ${res.status}`);
+      const data = parse(await res.json());
+      provider = i;
+      return data;
+    } catch (err) {
+      last = err instanceof Error ? err.message : String(err);
+    }
+  }
+  // Only now is it worth backing off: every provider refused.
+  throw new Error(last || "no adsb provider answered");
 }
 
 export async function GET() {
