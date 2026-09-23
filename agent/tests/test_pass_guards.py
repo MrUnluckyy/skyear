@@ -120,3 +120,102 @@ def test_airborne_traffic_with_fresh_fixes_is_unaffected():
     assert len(out) == 1
     assert out[0]["flight"] == "BTI4TK"
     assert out[0]["alt_m"] == 1000
+
+
+class GoesBlind:
+    """One aircraft mid-pass, and an ADS-B feed that stops answering.
+
+    While blind the snapshot keeps returning the last fix it ever got, which is
+    exactly what the real tracker does - it has nothing newer to hand out.
+    """
+
+    def __init__(self, base, hex_id="4ca7b1"):
+        self.inner = FakeAdsb(hex_id=hex_id, t_closest=base)
+        self.hex = hex_id
+        self.last_seen = base
+        self.blind_s = 0.0
+
+    def see(self, t):
+        """The feed answers: the fix advances to t."""
+        self.inner.now = self.last_seen = t
+        self.blind_s = 0.0
+
+    def go_blind(self, now):
+        self.blind_s = now - self.last_seen
+
+    def snapshot(self):
+        return self.inner.snapshot()
+
+    def blind_for(self, now=None):
+        return self.blind_s
+
+
+def test_a_blind_feed_does_not_close_a_pass_or_invent_a_closest_approach():
+    """The 429 storms in the 2026-09-22 log did this silently.
+
+    An aircraft is inside the radius when the feed goes down. Its last fix then
+    ages past the 90 s staleness threshold, and the pass used to close on it -
+    recording a closest approach of wherever the aircraft happened to be when we
+    lost sight of it, as a `not heard` at that wrong range. Once the feed came
+    back the same aircraft opened a second pass, so one real pass reached the
+    range stats twice and neither entry was true.
+    """
+    base = 1_000_000.0
+    out = []
+    adsb = GoesBlind(base)
+    pt = PassTracker(adsb, SENSOR, 40_000, on_pass=out.append)
+
+    # seen approaching, 30 km out: the pass opens
+    adsb.see(base - 150)
+    pt.tick(now=base - 150)
+    assert len(pt.open) == 1
+
+    # the feed dies, right before the real closest approach at `base`
+    for now in range(int(base - 140), int(base + 140), 10):
+        adsb.go_blind(now)
+        pt.tick(now=now)
+
+    assert out == [], "a pass was closed while we could not see anything"
+    assert len(pt.open) == 1, "the pass must stay open until the feed returns"
+
+    # the feed returns, the aircraft is on its way out, and the pass closes
+    adsb.see(base + 140)
+    pt.tick(now=base + 140)
+    adsb.see(base + 250)
+    pt.tick(now=base + 250)
+
+    assert len(out) == 1, "one real pass must produce exactly one record"
+    rec = out[0]
+    assert rec["adsb_gap_s"] >= 280, "the blind window must be on the record"
+    # and the honest part: the recorded closest approach is the best we saw,
+    # not the true 1500 m, which is precisely what adsb_gap_s warns about
+    assert rec["min_slant_m"] > 10_000
+
+
+def test_a_healthy_feed_records_no_gap():
+    t0 = time.time()
+    out = []
+    adsb = FakeAdsb(t_closest=t0)
+    pt = PassTracker(adsb, SENSOR, 8000, on_pass=out.append)
+    for i in range(-40, 100, 5):   # far enough past for the pass to close
+        adsb.now = t0 + i
+        pt.tick(now=t0 + i)
+    assert out and all(r["adsb_gap_s"] == 0.0 for r in out)
+
+
+def test_an_endless_outage_eventually_closes_the_pass():
+    """Holding is right for a minute or two; holding forever leaks passes that
+    will never be resolved."""
+    base = 1_000_000.0
+    out = []
+    adsb = GoesBlind(base)
+    pt = PassTracker(adsb, SENSOR, 40_000, on_pass=out.append, blind_hold_max_s=300.0)
+
+    adsb.see(base - 150)
+    pt.tick(now=base - 150)
+    for now in range(int(base - 140), int(base + 400), 10):
+        adsb.go_blind(now)
+        pt.tick(now=now)
+
+    assert len(out) == 1
+    assert out[0]["adsb_gap_s"] >= 300

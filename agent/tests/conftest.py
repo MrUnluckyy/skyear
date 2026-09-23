@@ -22,7 +22,8 @@ class FakeAdsb:
     """
 
     def __init__(self, hex_id="4ca7b1", speed_mps=200.0, alt_m=1000.0,
-                 t_closest=0.0, offset_north_m=1500.0, sensor=SENSOR, meta=None):
+                 t_closest=0.0, offset_north_m=1500.0, sensor=SENSOR, meta=None,
+                 blind_s=0.0):
         self.hex = hex_id
         self.speed = speed_mps
         self.alt = alt_m
@@ -31,6 +32,7 @@ class FakeAdsb:
         self.sensor = sensor
         self.meta = meta or {"flight": "BTI4TK", "type": "BCS3", "reg": "YL-AAS"}
         self.now = t_closest
+        self.blind_s = blind_s   # how long the feed has been down, if at all
 
     def position_at(self, hx, t, max_gap_s=30.0):
         if hx != self.hex:
@@ -43,3 +45,6 @@ class FakeAdsb:
     def snapshot(self):
         lat, lon, alt = self.position_at(self.hex, self.now)
         return {self.hex: (dict(self.meta), (self.now, lat, lon, alt))}
+
+    def blind_for(self, now=None):
+        return self.blind_s

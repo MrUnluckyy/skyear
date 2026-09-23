@@ -1,10 +1,18 @@
 # SkyEar agent config. Copy to config.yaml and edit.
 
 adsb:
-  provider: adsb.lol        # adsb.lol | airplanes.live | readsb
+  # A single name is the preferred source, not an exclusive one: the other free
+  # APIs stay behind it as fallbacks, because any one of them sheds load
+  # unpredictably (measured 2026-09-23 at a 10 s poll: adsb.lol shed 17% of
+  # requests, adsb.fi none). Write a list to pin the rotation: [adsb.fi]
+  provider: adsb.fi         # adsb.fi | adsb.lol | airplanes.live | readsb
+  # airplanes.live closed its open API - it 403s until you are granted access
+  # by mailing contact@airplanes.live. readsb is your own receiver and never
+  # falls back to a public API:
   # readsb_url: http://raspberrypi.local/tar1090/data/aircraft.json
-  poll_seconds: 10          # adsb.lol returns 429 at 5 s; 10 s stays under the limit
-  max_backoff_s: 300        # cap for exponential backoff after failed polls
+  poll_seconds: 10          # these APIs allow ~1 req/s; 10 s is polite and plenty
+  rate_limit_backoff_s: 60  # cap after a 429 - load shedding clears in seconds
+  max_backoff_s: 300        # cap after a network failure, which does not
   radius_nm: 15             # ~28 km around the first camera
   # lat/lon default to the first camera
 

@@ -221,3 +221,51 @@ tuned against a speaker is tuned against the wrong signal.
 **Migrations 0008–0011 were applied to the database days before they existed in
 this repo.** They have been written back. Apply through the repo, not the MCP
 tool, or the schema history is only in Supabase.
+
+### 2026-09-23 — the ADS-B 429s were the provider, not us, and they were eating passes
+Appended by Claude Code.
+
+**`adsb.lol` sheds ~17% of requests at any rate.** Measured from one client,
+48 polls at 10 s to each provider side by side: adsb.lol returned 429 for 8 of
+48, adsb.fi for none. A separate burst test put the limit at roughly 1 req/s, so
+a 10 s poll is two orders of magnitude under it — **the 429s are the provider
+shedding load, and polling slower cannot fix them.** That closes the open
+question from 2026-09-17. Neither API sends `Retry-After` or any rate-limit
+header; adsb.lol's 429 is a plain nginx HTML page, so the `Retry-After` path
+that was written and tested never actually fires in the field.
+
+**`airplanes.live` is gone as a fallback.** Anonymous requests now get 403 with
+"contact us at contact@airplanes.live". It was the documented alternative in
+`config.example.yaml`, and it would have failed every poll.
+
+**`adsb.fi` (`opendata.adsb.fi/api/v2/...`) is a working second source** on the
+identical readsb schema, so `ingest` needed no change. It is now the default,
+with adsb.lol behind it.
+
+**The fix is rotation, not backoff.** A shed request switches provider after 1 s
+instead of sitting out a 10–40 s blind window; the exponential backoff now only
+applies once *every* provider has failed. A 429 is also capped at 60 s rather
+than 300 s, because load shedding clears in seconds and a five minute blind
+window costs more aircraft passes than it saves requests.
+
+**The damage was not in the log.** `PassTracker` closes a pass when its last fix
+is 90 s old. During a 429 storm that threshold is reached because *we* went
+blind, not because the aircraft left — so the pass closed with a `min_slant_m`
+recorded wherever the aircraft happened to be when we lost sight of it, written
+as `not heard` at that wrong range, and the same aircraft opened a second pass
+on recovery. One real pass, two false entries in the range stats, no warning.
+Passes are now held open while the feed is down and stamped with `adsb_gap_s`
+(0.0 when healthy), so the analysis can discount them. Held passes close anyway
+after `blind_hold_max_s` (600 s) rather than leak.
+
+**A setup-page install has no `adsb` config at all.** `docker-compose.yml` does
+not mount `config.yaml`, and `config_store.to_agent_config` only merges an
+`adsb` section if one was stored — nothing in the setup page ever writes one. So
+every ADS-B value on a deployed agent comes from the defaults in `main.py`,
+which is why the NAS was polling at 5 s while `config.example.yaml` said 10.
+**Changing those defaults is the whole deployment step; there is no file to
+edit.** The default poll is now 10 s.
+
+**Still the real answer: local `readsb` + RTL-SDR.** No rate limit, ~1 Hz
+instead of 10 s, and own provenance. A local receiver deliberately does *not*
+fall back to a public API.

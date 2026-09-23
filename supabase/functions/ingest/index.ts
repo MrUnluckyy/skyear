@@ -207,6 +207,13 @@ Deno.serve(async (req) => {
     const sensor_id = sensorByCamera.get(String(p.camera ?? ""));
     const closest_at = iso(p.closest_time);
     if (!sensor_id || !closest_at || typeof p.hex !== "string") continue;
+    // A pass the agent watched through an ADS-B outage is not evidence either
+    // way: the real closest approach may have happened while the feed was down,
+    // so min_slant_m is only an upper bound on how close it got, and heard
+    // false says nothing. Same class of problem as the agent clock drift in
+    // migration 0012, so it gets the same treatment - ingested for the record,
+    // excluded from every stat.
+    const gapS = Math.round(num(p.adsb_gap_s) ?? 0);
     passRows.push({
       sensor_id,
       device_id: device.id,
@@ -220,6 +227,9 @@ Deno.serve(async (req) => {
       elevation_deg: num(p.elevation_deg),
       heard: Boolean(p.heard),
       event_ids: Array.isArray(p.event_ids) ? p.event_ids : [],
+      excluded_reason: gapS > 0
+        ? `ADS-B feed down ${gapS}s during this pass: closest approach unobserved`
+        : null,
     });
   }
 

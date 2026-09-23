@@ -46,14 +46,25 @@ def match_event(adsb, sensor, event, max_range_m, max_fix_age_s=60.0,
     return cands[:5]
 
 
+def _blind_for(adsb, now):
+    """Seconds the ADS-B feed has been down, or 0 for a source that cannot say.
+
+    Test fakes and local receivers need not implement it; only the polling
+    tracker knows when it lost the feed.
+    """
+    fn = getattr(adsb, "blind_for", None)
+    return fn(now) if fn else 0.0
+
+
 class PassTracker:
     """Tracks closest approach of each aircraft to a sensor; emits a pass record
     once it has moved away, noting whether any sound event lined up with it."""
 
     def __init__(self, adsb, sensor, radius_m, on_pass, max_fix_age_s=60.0,
-                 track_ground=False, reopen_cooldown_s=120.0):
+                 track_ground=False, reopen_cooldown_s=120.0, blind_hold_max_s=600.0):
         self.adsb, self.sensor, self.radius_m, self.on_pass = adsb, sensor, radius_m, on_pass
         self.max_fix_age_s = max_fix_age_s
+        self.blind_hold_max_s = blind_hold_max_s
         self.track_ground = track_ground
         self.reopen_cooldown_s = reopen_cooldown_s
         self.open = {}       # hex -> pass dict
@@ -69,6 +80,7 @@ class PassTracker:
 
     def tick(self, now=None):
         now = now or time.time()
+        blind = _blind_for(self.adsb, now)
         snap = self.adsb.snapshot()
         for hx, (meta, (t, lat, lon, alt)) in snap.items():
             # A parked transponder keeps reporting the same frozen fix. Without
@@ -92,6 +104,17 @@ class PassTracker:
                 p["last_t"] = t
         for hx in list(self.open):
             p = self.open[hx]
+            # The feed being down is not the aircraft leaving. Closing a pass
+            # during a blind window records a closest approach that never
+            # happened - and once the feed returns the same aircraft opens a
+            # second pass, so one real pass lands in the range stats twice, both
+            # times wrong. Hold instead, and stamp the pass so the analysis can
+            # discount it. Past blind_hold_max_s the aircraft is genuinely long
+            # gone; close it, flagged, rather than hold open forever.
+            if blind > self.max_fix_age_s:
+                p["adsb_gap_s"] = max(p.get("adsb_gap_s", 0.0), blind)
+                if blind < self.blind_hold_max_s:
+                    continue
             gone = hx not in snap or now - p["last_t"] > 90
             if not gone:
                 _, (t, lat, lon, alt) = snap[hx]
@@ -114,4 +137,5 @@ class PassTracker:
             "alt_m": round(p["alt_m_at_min"]), "elevation_deg": round(p["elev_deg_at_min"], 1),
             "heard": bool(hits), "event_ids": [e[2] for e in hits],
             "on_ground": p.get("on_ground", False),
+            "adsb_gap_s": round(p.get("adsb_gap_s", 0.0), 1),
         })

@@ -259,17 +259,25 @@ def run_check(cfg, cams, a):
         detail = (r.stdout.strip() if audio
                   else _scrub(r.stderr.strip() or r.stdout.strip() or "no audio stream", pw))
         print(f"[{c['id']}] {'OK audio: ' + detail if audio else 'FAIL ' + detail}")
-    t = AdsbTracker(a.get("provider", "adsb.lol"), a.get("lat", cams[0]["lat"]), a.get("lon", cams[0]["lon"]),
+    t = AdsbTracker(a.get("provider", "adsb.fi"), a.get("lat", cams[0]["lat"]), a.get("lon", cams[0]["lon"]),
                     a.get("radius_nm", 15), readsb_url=a.get("readsb_url"))
-    try:
-        t.poll_once()
-        snap = t.snapshot()
-        print(f"[adsb] OK {len(snap)} aircraft within {t.radius_nm} nm")
-        for hx, (m, (_, lat, lon, alt)) in list(snap.items())[:10]:
-            print(f"   {m.get('flight') or hx:9} {m.get('type') or '?':5} alt {alt:6.0f} m")
-    except Exception as e:
-        ok = False
-        print(f"[adsb] FAIL {e}")
+    # Probe the whole rotation, not just the first provider: --check exists to
+    # tell the operator which sources this network can actually reach, and the
+    # agent will fail over to any of them at runtime.
+    reachable = []
+    for i, name in enumerate(t.providers):
+        if i:
+            time.sleep(1)  # these APIs allow roughly one request a second
+        t.pi = i
+        try:
+            t.poll_once()
+            reachable.append(name)
+            print(f"[adsb] OK {name}: {len(t.snapshot())} aircraft within {t.radius_nm} nm")
+        except Exception as e:
+            print(f"[adsb] FAIL {name}: {e}")
+    ok &= bool(reachable)
+    for hx, (m, (_, lat, lon, alt)) in list(t.snapshot().items())[:10]:
+        print(f"   {m.get('flight') or hx:9} {m.get('type') or '?':5} alt {alt:6.0f} m")
     return 0 if ok else 1
 
 
@@ -336,9 +344,10 @@ def main():
             stop.wait(1)
         return 0
 
-    adsb = AdsbTracker(a.get("provider", "adsb.lol"), a.get("lat", cams[0]["lat"]), a.get("lon", cams[0]["lon"]),
-                       a.get("radius_nm", 15), a.get("poll_seconds", 5), a.get("readsb_url"),
-                       max_backoff_s=a.get("max_backoff_s", 300))
+    adsb = AdsbTracker(a.get("provider", "adsb.fi"), a.get("lat", cams[0]["lat"]), a.get("lon", cams[0]["lon"]),
+                       a.get("radius_nm", 15), a.get("poll_seconds", 10), a.get("readsb_url"),
+                       max_backoff_s=a.get("max_backoff_s", 300),
+                       rate_limit_backoff_s=a.get("rate_limit_backoff_s", 60))
     threading.Thread(target=adsb.run, args=(stop,), daemon=True, name="adsb").start()
     threading.Thread(target=cleanup_loop, args=(out_dir, cfg.get("clips", {}).get("keep_days", 14), stop),
                      daemon=True, name="cleanup").start()
